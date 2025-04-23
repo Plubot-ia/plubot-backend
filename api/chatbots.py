@@ -1,0 +1,290 @@
+from flask import Blueprint, jsonify, request
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from config.settings import get_session
+from models.chatbot import Chatbot
+from models.flow import Flow
+from models.flow_edge import FlowEdge
+from models.template import Template
+from utils.validators import FlowModel
+from utils.helpers import parse_menu_to_flows
+from services.grok_service import call_grok
+from celery_tasks import process_pdf_async
+import logging
+import json
+
+chatbots_bp = Blueprint('chatbots', __name__)
+logger = logging.getLogger(__name__)
+
+@chatbots_bp.route('/create', methods=['POST'])
+@jwt_required()
+def create_bot():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No se proporcionaron datos'}), 400
+
+    name = data.get('name')
+    tone = data.get('tone', 'amigable')
+    purpose = data.get('purpose', 'ayudar a los clientes')
+    whatsapp_number = data.get('whatsapp_number')
+    business_info = data.get('business_info')
+    pdf_url = data.get('pdf_url')
+    image_url = data.get('image_url')
+    flows_raw = data.get('flows', [])
+    edges_raw = data.get('edges', [])
+    template_id = data.get('template_id')
+    menu_json = data.get('menu_json')
+
+    if not name:
+        return jsonify({'status': 'error', 'message': 'El nombre del chatbot es obligatorio'}), 400
+
+    flows = []
+    user_messages = set()
+    for index, flow in enumerate(flows_raw):
+        try:
+            validated_flow = FlowModel(**flow)
+            user_msg = validated_flow.user_message.strip().lower()
+            bot_resp = validated_flow.bot_response.strip()
+            if not user_msg or not bot_resp:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'El flujo en la posición {index} tiene mensajes vacíos.'
+                }), 400
+            if user_msg in user_messages:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'El mensaje de usuario "{user_msg}" en la posición {index} está duplicado.'
+                }), 400
+            user_messages.add(user_msg)
+            flows.append(validated_flow.dict())
+        except Exception as e:
+            logger.error(f"Flujo inválido en posición {index}: {str(e)}")
+            return jsonify({'status': 'error', 'message': f'Flujo inválido en la posición {index}: {str(e)}'}), 400
+
+    with get_session() as session:
+        try:
+            flows_to_save = flows
+            if template_id:
+                template = session.query(Template).filter_by(id=template_id).first()
+                if template:
+                    tone = template.tone
+                    purpose = template.purpose
+                    template_flows = json.loads(template.flows)
+                    flows_to_save = template_flows + flows if flows else template_flows
+
+            if menu_json:
+                menu_flows = parse_menu_to_flows(menu_json)
+                flows_to_save = flows_to_save + menu_flows if flows_to_save else menu_flows
+
+            system_message = f"Eres un chatbot {tone} llamado '{name}'. Tu propósito es {purpose}."
+            if business_info:
+                system_message += f"\nNegocio: {business_info}"
+            if pdf_url:
+                system_message += "\nContenido del PDF será añadido tras procesar."
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": "Dame un mensaje de bienvenida."}
+            ]
+            initial_message = call_grok(messages, max_tokens=100)
+
+            chatbot = Chatbot(
+                name=name, tone=tone, purpose=purpose, initial_message=initial_message,
+                whatsapp_number=whatsapp_number, business_info=business_info, pdf_url=pdf_url,
+                image_url=image_url, user_id=user_id
+            )
+            session.add(chatbot)
+            session.commit()
+            chatbot_id = chatbot.id
+
+            if pdf_url:
+                process_pdf_async.delay(chatbot_id, pdf_url)
+
+            flow_id_map = {}
+            for index, flow in enumerate(flows_to_save):
+                if flow.get('user_message') and flow.get('bot_response'):
+                    intent = flow.get('intent', 'general')
+                    condition = flow.get('condition', '')
+                    flow_entry = Flow(
+                        chatbot_id=chatbot_id,
+                        user_message=flow['user_message'],
+                        bot_response=flow['bot_response'],
+                        position=index,
+                        intent=intent,
+                        condition=condition
+                    )
+                    session.add(flow_entry)
+                    session.flush()
+                    flow_id_map[str(index)] = flow_entry.id
+
+            for edge in edges_raw:
+                source_id = flow_id_map.get(edge.get('source'))
+                target_id = flow_id_map.get(edge.get('target'))
+                if source_id and target_id:
+                    edge_entry = FlowEdge(
+                        chatbot_id=chatbot_id,
+                        source_flow_id=source_id,
+                        target_flow_id=target_id,
+                        condition=""
+                    )
+                    session.add(edge_entry)
+
+            session.commit()
+            return jsonify({'status': 'success', 'message': f"Chatbot '{name}' creado con éxito. ID: {chatbot_id}."}), 200
+        except Exception as e:
+            logger.exception(f"Error al crear chatbot: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@chatbots_bp.route('/list', methods=['GET', 'OPTIONS'])
+@jwt_required()
+def list_bots():
+    if request.method == 'OPTIONS':
+        return jsonify({'message': 'Preflight OK'}), 200
+    user_id = get_jwt_identity()
+    with get_session() as session:
+        chatbots = session.query(Chatbot).filter_by(user_id=user_id).all()
+        chatbots_data = [
+            {
+                'id': bot.id,
+                'name': bot.name,
+                'tone': bot.tone,
+                'purpose': bot.purpose,
+                'whatsapp_number': bot.whatsapp_number,
+                'initial_message': bot.initial_message,
+                'business_info': bot.business_info,
+                'pdf_url': bot.pdf_url,
+                'image_url': bot.image_url,
+                'created_at': bot.created_at.isoformat() if bot.created_at else None,
+                'updated_at': bot.updated_at.isoformat() if bot.updated_at else None
+            } for bot in chatbots
+        ]
+        return jsonify({'chatbots': chatbots_data}), 200
+
+@chatbots_bp.route('/update/<int:chatbot_id>', methods=['PUT', 'OPTIONS'])
+@jwt_required()
+def update_bot(chatbot_id):
+    if request.method == 'OPTIONS':
+        return jsonify({'message': 'Preflight OK'}), 200
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No se proporcionaron datos'}), 400
+
+    name = data.get('name')
+    tone = data.get('tone')
+    purpose = data.get('purpose')
+    whatsapp_number = data.get('whatsapp_number')
+    business_info = data.get('business_info')
+    pdf_url = data.get('pdf_url')
+    image_url = data.get('image_url')
+    flows_raw = data.get('flows', [])
+    edges_raw = data.get('edges', [])
+    template_id = data.get('template_id')
+    menu_json = data.get('menu_json')
+
+    if not name:
+        return jsonify({'status': 'error', 'message': 'El nombre del chatbot es obligatorio'}), 400
+
+    flows = []
+    user_messages = set()
+    for index, flow in enumerate(flows_raw):
+        try:
+            validated_flow = FlowModel(**flow)
+            user_msg = validated_flow.user_message.lower()
+            if not user_msg or not validated_flow.bot_response:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'El flujo en la posición {index} tiene mensajes vacíos.'
+                }), 400
+            if user_msg in user_messages:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'El mensaje de usuario "{user_msg}" en la posición {index} está duplicado.'
+                }), 400
+            user_messages.add(user_msg)
+            flows.append(validated_flow.dict())
+        except Exception as e:
+            logger.error(f"Flujo inválido en posición {index}: {str(e)}")
+            return jsonify({'status': 'error', 'message': f'Flujo inválido en la posición {index}: {str(e)}'}), 400
+
+    with get_session() as session:
+        chatbot = session.query(Chatbot).filter_by(id=chatbot_id, user_id=user_id).first()
+        if not chatbot:
+            return jsonify({'status': 'error', 'message': 'Chatbot no encontrado o no tienes permisos'}), 404
+
+        chatbot.name = name
+        if tone:
+            chatbot.tone = tone
+        if purpose:
+            chatbot.purpose = purpose
+        if whatsapp_number:
+            chatbot.whatsapp_number = whatsapp_number
+        if business_info is not None:
+            chatbot.business_info = business_info
+        if pdf_url is not None:
+            chatbot.pdf_url = pdf_url
+            process_pdf_async.delay(chatbot_id, pdf_url)
+        if image_url is not None:
+            chatbot.image_url = image_url
+
+        flows_to_save = flows
+        if template_id:
+            template = session.query(Template).filter_by(id=template_id).first()
+            if template:
+                chatbot.tone = template.tone
+                chatbot.purpose = template.purpose
+                template_flows = json.loads(template.flows)
+                flows_to_save = template_flows + flows if flows else template_flows
+
+        if menu_json:
+            menu_flows = parse_menu_to_flows(menu_json)
+            flows_to_save = flows_to_save + menu_flows if flows_to_save else menu_flows
+
+        session.query(Flow).filter_by(chatbot_id=chatbot_id).delete()
+        session.query(FlowEdge).filter_by(chatbot_id=chatbot_id).delete()
+
+        flow_id_map = {}
+        for index, flow in enumerate(flows_to_save):
+            if flow.get('user_message') and flow.get('bot_response'):
+                intent = flow.get('intent', 'general')
+                condition = flow.get('condition', '')
+                flow_entry = Flow(
+                    chatbot_id=chatbot_id,
+                    user_message=flow['user_message'],
+                    bot_response=flow['bot_response'],
+                    position=index,
+                    intent=intent,
+                    condition=condition
+                )
+                session.add(flow_entry)
+                session.flush()
+                flow_id_map[str(index)] = flow_entry.id
+
+        for edge in edges_raw:
+            source_id = flow_id_map.get(edge.get('source'))
+            target_id = flow_id_map.get(edge.get('target'))
+            if source_id and target_id:
+                edge_entry = FlowEdge(
+                    chatbot_id=chatbot_id,
+                    source_flow_id=source_id,
+                    target_flow_id=target_id,
+                    condition=""
+                )
+                session.add(edge_entry)
+
+        session.commit()
+        return jsonify({'status': 'success', 'message': f"Chatbot '{name}' actualizado con éxito."}), 200
+
+@chatbots_bp.route('/delete/<int:chatbot_id>', methods=['DELETE'])
+@jwt_required()
+def delete_bot(chatbot_id):
+    user_id = get_jwt_identity()
+    with get_session() as session:
+        chatbot = session.query(Chatbot).filter_by(id=chatbot_id, user_id=user_id).first()
+        if not chatbot:
+            return jsonify({'status': 'error', 'message': 'Chatbot no encontrado o no tienes permisos'}), 404
+
+        session.query(Flow).filter_by(chatbot_id=chatbot_id).delete()
+        session.query(FlowEdge).filter_by(chatbot_id=chatbot_id).delete()
+        session.query(Chatbot).filter_by(id=chatbot_id).delete()
+        session.commit()
+        return jsonify({'status': 'success', 'message': f"Chatbot '{chatbot.name}' eliminado con éxito."}), 200
