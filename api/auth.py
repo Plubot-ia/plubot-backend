@@ -75,10 +75,10 @@ def verify_email(token):
             if not user:
                 return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
             if user.is_verified:
-                return jsonify({'status': 'info', 'message': 'Tu correo ya está verificado. Inicia sesión.'}), 200
+                return redirect('https://www.plubot.com/login?message=already_verified')
             user.is_verified = True
             session.commit()
-            return jsonify({'status': 'success', 'message': 'Correo verificado con éxito. Ahora puedes iniciar sesión.'}), 200
+            return redirect('https://www.plubot.com/login?message=verified')
     except Exception as e:
         logger.exception(f"Error al verificar correo: {str(e)}")
         return jsonify({'status': 'error', 'message': 'El enlace de verificación es inválido o ha expirado.'}), 400
