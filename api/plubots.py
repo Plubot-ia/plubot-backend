@@ -1,10 +1,11 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from config.settings import get_session
-from models.chatbot import Chatbot
+from models.plubot import Plubot
 from models.flow import Flow
 from models.flow_edge import FlowEdge
 from models.template import Template
+from models.user import User  # Importar User
 from utils.validators import FlowModel
 from utils.helpers import parse_menu_to_flows
 from services.grok_service import call_grok
@@ -12,10 +13,10 @@ from celery_tasks import process_pdf_async
 import logging
 import json
 
-chatbots_bp = Blueprint('chatbots', __name__)
+plubots_bp = Blueprint('plubots', __name__)
 logger = logging.getLogger(__name__)
 
-@chatbots_bp.route('/create', methods=['POST'])
+@plubots_bp.route('/create', methods=['POST'])
 @jwt_required()
 def create_bot():
     user_id = get_jwt_identity()
@@ -26,6 +27,8 @@ def create_bot():
     name = data.get('name')
     tone = data.get('tone', 'amigable')
     purpose = data.get('purpose', 'ayudar a los clientes')
+    color = data.get('color')
+    powers = data.get('powers', [])
     whatsapp_number = data.get('whatsapp_number')
     business_info = data.get('business_info')
     pdf_url = data.get('pdf_url')
@@ -34,9 +37,13 @@ def create_bot():
     edges_raw = data.get('edges', [])
     template_id = data.get('template_id')
     menu_json = data.get('menu_json')
+    power_config = data.get('powerConfig', {})  # Obtener powerConfig
 
     if not name:
-        return jsonify({'status': 'error', 'message': 'El nombre del chatbot es obligatorio'}), 400
+        return jsonify({'status': 'error', 'message': 'El nombre del plubot es obligatorio'}), 400
+
+    if not isinstance(powers, list):
+        return jsonify({'status': 'error', 'message': 'Los poderes deben ser una lista'}), 400
 
     flows = []
     user_messages = set()
@@ -76,7 +83,7 @@ def create_bot():
                 menu_flows = parse_menu_to_flows(menu_json)
                 flows_to_save = flows_to_save + menu_flows if flows_to_save else menu_flows
 
-            system_message = f"Eres un chatbot {tone} llamado '{name}'. Tu propósito es {purpose}."
+            system_message = f"Eres un plubot {tone} llamado '{name}'. Tu propósito es {purpose}."
             if business_info:
                 system_message += f"\nNegocio: {business_info}"
             if pdf_url:
@@ -87,17 +94,36 @@ def create_bot():
             ]
             initial_message = call_grok(messages, max_tokens=100)
 
-            chatbot = Chatbot(
-                name=name, tone=tone, purpose=purpose, initial_message=initial_message,
-                whatsapp_number=whatsapp_number, business_info=business_info, pdf_url=pdf_url,
-                image_url=image_url, user_id=user_id
+            plubot = Plubot(
+                name=name,
+                tone=tone,
+                purpose=purpose,
+                initial_message=initial_message,
+                whatsapp_number=whatsapp_number,
+                business_info=business_info,
+                pdf_url=pdf_url,
+                image_url=image_url,
+                user_id=user_id,
+                color=color,
+                powers=','.join(powers) if powers else None
             )
-            session.add(chatbot)
+            session.add(plubot)
+            session.flush()  # Obtener plubot.id antes de commit
+
+            # Guardar google_sheets_credentials si se proporcionan
+            if power_config.get('google-sheets', {}).get('credentials'):
+                user = session.query(User).filter_by(id=user_id).first()
+                if user:
+                    user.google_sheets_credentials = power_config['google-sheets']['credentials']
+                else:
+                    logger.error(f"Usuario con ID {user_id} no encontrado")
+                    return jsonify({'status': 'error', 'message': 'Usuario no encontrado'}), 404
+
             session.commit()
-            chatbot_id = chatbot.id
+            plubot_id = plubot.id
 
             if pdf_url:
-                process_pdf_async.delay(chatbot_id, pdf_url)
+                process_pdf_async.delay(plubot_id, pdf_url)
 
             flow_id_map = {}
             for index, flow in enumerate(flows_to_save):
@@ -105,7 +131,7 @@ def create_bot():
                     intent = flow.get('intent', 'general')
                     condition = flow.get('condition', '')
                     flow_entry = Flow(
-                        chatbot_id=chatbot_id,
+                        chatbot_id=plubot_id,
                         user_message=flow['user_message'],
                         bot_response=flow['bot_response'],
                         position=index,
@@ -121,7 +147,7 @@ def create_bot():
                 target_id = flow_id_map.get(edge.get('target'))
                 if source_id and target_id:
                     edge_entry = FlowEdge(
-                        chatbot_id=chatbot_id,
+                        chatbot_id=plubot_id,
                         source_flow_id=source_id,
                         target_flow_id=target_id,
                         condition=""
@@ -129,25 +155,46 @@ def create_bot():
                     session.add(edge_entry)
 
             session.commit()
-            return jsonify({'status': 'success', 'message': f"Chatbot '{name}' creado con éxito. ID: {chatbot_id}."}), 200
+            return jsonify({
+                'status': 'success',
+                'message': f"Plubot '{name}' creado con éxito. ID: {plubot_id}.",
+                'plubot': {
+                    'id': plubot.id,
+                    'name': plubot.name,
+                    'tone': plubot.tone,
+                    'purpose': plubot.purpose,
+                    'color': plubot.color,
+                    'powers': plubot.powers.split(',') if plubot.powers else [],
+                    'whatsapp_number': plubot.whatsapp_number,
+                    'initial_message': plubot.initial_message,
+                    'business_info': plubot.business_info,
+                    'pdf_url': plubot.pdf_url,
+                    'image_url': plubot.image_url,
+                    'created_at': plubot.created_at.isoformat() if plubot.created_at else None,
+                    'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None
+                }
+            }), 200
         except Exception as e:
-            logger.exception(f"Error al crear chatbot: {str(e)}")
+            logger.exception(f"Error al crear plubot: {str(e)}")
+            session.rollback()
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@chatbots_bp.route('/list', methods=['GET', 'OPTIONS'])
+@plubots_bp.route('/list', methods=['GET', 'OPTIONS'])
 @jwt_required()
 def list_bots():
     if request.method == 'OPTIONS':
         return jsonify({'message': 'Preflight OK'}), 200
     user_id = get_jwt_identity()
     with get_session() as session:
-        chatbots = session.query(Chatbot).filter_by(user_id=user_id).all()
-        chatbots_data = [
+        plubots = session.query(Plubot).filter_by(user_id=user_id).all()
+        plubots_data = [
             {
                 'id': bot.id,
                 'name': bot.name,
                 'tone': bot.tone,
                 'purpose': bot.purpose,
+                'color': bot.color,
+                'powers': bot.powers.split(',') if bot.powers else [],
                 'whatsapp_number': bot.whatsapp_number,
                 'initial_message': bot.initial_message,
                 'business_info': bot.business_info,
@@ -155,13 +202,13 @@ def list_bots():
                 'image_url': bot.image_url,
                 'created_at': bot.created_at.isoformat() if bot.created_at else None,
                 'updated_at': bot.updated_at.isoformat() if bot.updated_at else None
-            } for bot in chatbots
+            } for bot in plubots
         ]
-        return jsonify({'chatbots': chatbots_data}), 200
+        return jsonify({'plubots': plubots_data}), 200
 
-@chatbots_bp.route('/update/<int:chatbot_id>', methods=['PUT', 'OPTIONS'])
+@plubots_bp.route('/update/<int:plubot_id>', methods=['PUT', 'OPTIONS'])
 @jwt_required()
-def update_bot(chatbot_id):
+def update_bot(plubot_id):
     if request.method == 'OPTIONS':
         return jsonify({'message': 'Preflight OK'}), 200
     user_id = get_jwt_identity()
@@ -172,6 +219,8 @@ def update_bot(chatbot_id):
     name = data.get('name')
     tone = data.get('tone')
     purpose = data.get('purpose')
+    color = data.get('color')
+    powers = data.get('powers', [])
     whatsapp_number = data.get('whatsapp_number')
     business_info = data.get('business_info')
     pdf_url = data.get('pdf_url')
@@ -180,9 +229,13 @@ def update_bot(chatbot_id):
     edges_raw = data.get('edges', [])
     template_id = data.get('template_id')
     menu_json = data.get('menu_json')
+    power_config = data.get('powerConfig', {})  # Obtener powerConfig
 
     if not name:
-        return jsonify({'status': 'error', 'message': 'El nombre del chatbot es obligatorio'}), 400
+        return jsonify({'status': 'error', 'message': 'El nombre del plubot es obligatorio'}), 400
+
+    if not isinstance(powers, list):
+        return jsonify({'status': 'error', 'message': 'Los poderes deben ser una lista'}), 400
 
     flows = []
     user_messages = set()
@@ -207,31 +260,44 @@ def update_bot(chatbot_id):
             return jsonify({'status': 'error', 'message': f'Flujo inválido en la posición {index}: {str(e)}'}), 400
 
     with get_session() as session:
-        chatbot = session.query(Chatbot).filter_by(id=chatbot_id, user_id=user_id).first()
-        if not chatbot:
-            return jsonify({'status': 'error', 'message': 'Chatbot no encontrado o no tienes permisos'}), 404
+        plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+        if not plubot:
+            return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
 
-        chatbot.name = name
+        plubot.name = name
         if tone:
-            chatbot.tone = tone
+            plubot.tone = tone
         if purpose:
-            chatbot.purpose = purpose
+            plubot.purpose = purpose
+        if color is not None:
+            plubot.color = color
+        if powers:
+            plubot.powers = ','.join(powers)
         if whatsapp_number:
-            chatbot.whatsapp_number = whatsapp_number
+            plubot.whatsapp_number = whatsapp_number
         if business_info is not None:
-            chatbot.business_info = business_info
+            plubot.business_info = business_info
         if pdf_url is not None:
-            chatbot.pdf_url = pdf_url
-            process_pdf_async.delay(chatbot_id, pdf_url)
+            plubot.pdf_url = pdf_url
+            process_pdf_async.delay(plubot_id, pdf_url)
         if image_url is not None:
-            chatbot.image_url = image_url
+            plubot.image_url = image_url
+
+        # Guardar google_sheets_credentials si se proporcionan
+        if power_config.get('google-sheets', {}).get('credentials'):
+            user = session.query(User).filter_by(id=user_id).first()
+            if user:
+                user.google_sheets_credentials = power_config['google-sheets']['credentials']
+            else:
+                logger.error(f"Usuario con ID {user_id} no encontrado")
+                return jsonify({'status': 'error', 'message': 'Usuario no encontrado'}), 404
 
         flows_to_save = flows
         if template_id:
             template = session.query(Template).filter_by(id=template_id).first()
             if template:
-                chatbot.tone = template.tone
-                chatbot.purpose = template.purpose
+                plubot.tone = template.tone
+                plubot.purpose = template.purpose
                 template_flows = json.loads(template.flows)
                 flows_to_save = template_flows + flows if flows else template_flows
 
@@ -239,8 +305,8 @@ def update_bot(chatbot_id):
             menu_flows = parse_menu_to_flows(menu_json)
             flows_to_save = flows_to_save + menu_flows if flows_to_save else menu_flows
 
-        session.query(Flow).filter_by(chatbot_id=chatbot_id).delete()
-        session.query(FlowEdge).filter_by(chatbot_id=chatbot_id).delete()
+        session.query(Flow).filter_by(chatbot_id=plubot_id).delete()
+        session.query(FlowEdge).filter_by(chatbot_id=plubot_id).delete()
 
         flow_id_map = {}
         for index, flow in enumerate(flows_to_save):
@@ -248,7 +314,7 @@ def update_bot(chatbot_id):
                 intent = flow.get('intent', 'general')
                 condition = flow.get('condition', '')
                 flow_entry = Flow(
-                    chatbot_id=chatbot_id,
+                    chatbot_id=plubot_id,
                     user_message=flow['user_message'],
                     bot_response=flow['bot_response'],
                     position=index,
@@ -264,7 +330,7 @@ def update_bot(chatbot_id):
             target_id = flow_id_map.get(edge.get('target'))
             if source_id and target_id:
                 edge_entry = FlowEdge(
-                    chatbot_id=chatbot_id,
+                    chatbot_id=plubot_id,
                     source_flow_id=source_id,
                     target_flow_id=target_id,
                     condition=""
@@ -272,19 +338,37 @@ def update_bot(chatbot_id):
                 session.add(edge_entry)
 
         session.commit()
-        return jsonify({'status': 'success', 'message': f"Chatbot '{name}' actualizado con éxito."}), 200
+        return jsonify({
+            'status': 'success',
+            'message': f"Plubot '{name}' actualizado con éxito.",
+            'plubot': {
+                'id': plubot.id,
+                'name': plubot.name,
+                'tone': plubot.tone,
+                'purpose': plubot.purpose,
+                'color': plubot.color,
+                'powers': plubot.powers.split(',') if plubot.powers else [],
+                'whatsapp_number': plubot.whatsapp_number,
+                'initial_message': plubot.initial_message,
+                'business_info': plubot.business_info,
+                'pdf_url': plubot.pdf_url,
+                'image_url': plubot.image_url,
+                'created_at': plubot.created_at.isoformat() if plubot.created_at else None,
+                'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None
+            }
+        }), 200
 
-@chatbots_bp.route('/delete/<int:chatbot_id>', methods=['DELETE'])
+@plubots_bp.route('/delete/<int:plubot_id>', methods=['DELETE'])
 @jwt_required()
-def delete_bot(chatbot_id):
+def delete_bot(plubot_id):
     user_id = get_jwt_identity()
     with get_session() as session:
-        chatbot = session.query(Chatbot).filter_by(id=chatbot_id, user_id=user_id).first()
-        if not chatbot:
-            return jsonify({'status': 'error', 'message': 'Chatbot no encontrado o no tienes permisos'}), 404
+        plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+        if not plubot:
+            return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
 
-        session.query(Flow).filter_by(chatbot_id=chatbot_id).delete()
-        session.query(FlowEdge).filter_by(chatbot_id=chatbot_id).delete()
-        session.query(Chatbot).filter_by(id=chatbot_id).delete()
+        session.query(Flow).filter_by(chatbot_id=plubot_id).delete()
+        session.query(FlowEdge).filter_by(chatbot_id=plubot_id).delete()
+        session.query(Plubot).filter_by(id=plubot_id).delete()
         session.commit()
-        return jsonify({'status': 'success', 'message': f"Chatbot '{chatbot.name}' eliminado con éxito."}), 200
+        return jsonify({'status': 'success', 'message': f"Plubot '{plubot.name}' eliminado con éxito."}), 200

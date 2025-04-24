@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request, redirect, url_for
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, create_access_token, set_access_cookies, unset_jwt_cookies, decode_token
 from config.settings import get_session
 from models.user import User
-from models.chatbot import Chatbot
+from models.plubot import Plubot
 from utils.validators import LoginModel, RegisterModel
 import bcrypt
 from flask_mail import Mail, Message
@@ -133,7 +133,6 @@ def forgot_password():
         return jsonify({'status': 'error', 'message': 'Email no proporcionado.'}), 400
     logger.info(f"Email recibido en forgot_password: '{email}' (longitud: {len(email)})")
     logger.info(f"Tipo de email: {type(email)}")
-    # Normalizar email
     email = email.strip().lower()
     logger.info(f"Email normalizado: '{email}'")
     with get_session() as session:
@@ -181,7 +180,7 @@ def reset_password(token):
     except Exception as e:
         logger.exception(f"Error en /reset_password: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
- 
+
 @auth_bp.route('/change_password', methods=['POST', 'OPTIONS'])
 @jwt_required()
 def change_password():
@@ -231,7 +230,9 @@ def get_profile():
                     'pdf_url': bot.pdf_url,
                     'image_url': bot.image_url,
                     'created_at': bot.created_at.isoformat() if bot.created_at else None,
-                    'updated_at': bot.updated_at.isoformat() if bot.updated_at else None
+                    'updated_at': bot.updated_at.isoformat() if bot.updated_at else None,
+                    'color': bot.color,
+                    'powers': bot.powers
                 } for bot in user.plubots
             ]
 
@@ -247,6 +248,7 @@ def get_profile():
                     'level': user.level,
                     'plucoins': user.plucoins,
                     'role': user.role,
+                    'powers': user.powers,
                     'is_verified': user.is_verified,
                     'created_at': user.created_at.isoformat() if user.created_at else None,
                     'updated_at': user.updated_at.isoformat() if user.updated_at else None,
@@ -256,7 +258,7 @@ def get_profile():
     except Exception as e:
         logger.exception(f"Error en /profile: {str(e)}")
         return jsonify({'status': 'error', 'message': 'Error al obtener los datos del perfil.'}), 500
-    
+
 @auth_bp.route('/profile', methods=['PUT', 'OPTIONS'])
 @jwt_required()
 def update_profile():
@@ -269,7 +271,6 @@ def update_profile():
             if not user:
                 return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
 
-            # Manejar datos del formulario (multipart/form-data) para la imagen
             if 'profile_picture' in request.files:
                 file = request.files['profile_picture']
                 if file and allowed_file(file.filename):
@@ -283,7 +284,6 @@ def update_profile():
                 else:
                     return jsonify({'status': 'error', 'message': 'Formato de archivo no permitido'}), 400
 
-            # Manejar otros campos de texto (si se envían en el formulario)
             if request.form:
                 if 'name' in request.form and request.form['name']:
                     user.name = request.form['name']
@@ -309,3 +309,124 @@ def update_profile():
     except Exception as e:
         logger.exception(f"Error en /profile (PUT): {str(e)}")
         return jsonify({'status': 'error', 'message': 'Error al actualizar el perfil'}), 500
+
+@auth_bp.route('/profile/powers', methods=['POST', 'OPTIONS'])
+@jwt_required()
+def add_power():
+    if request.method == 'OPTIONS':
+        return jsonify({'message': 'Preflight OK'}), 200
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        if not data or 'powerId' not in data:
+            return jsonify({'status': 'error', 'message': 'Se requiere el ID del poder'}), 400
+        
+        power_id = data['powerId']
+        with get_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if not user:
+                return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
+            
+            if user.powers is None:
+                user.powers = []
+            
+            if power_id in user.powers:
+                return jsonify({'status': 'error', 'message': 'El poder ya está agregado'}), 400
+            
+            if len(user.powers) >= 3:
+                return jsonify({'status': 'error', 'message': 'Límite de 3 poderes alcanzado'}), 400
+            
+            updated_powers = user.powers + [power_id]
+            user.powers = updated_powers
+            session.commit()
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Poder agregado correctamente',
+                'powers': user.powers
+            }), 200
+    except Exception as e:
+        logger.exception(f"Error al agregar poder: {str(e)}")
+        return jsonify({'status': 'error', 'message': 'Error al agregar el poder'}), 500
+
+@auth_bp.route('/profile/powers', methods=['DELETE', 'OPTIONS'])
+@jwt_required()
+def remove_power():
+    if request.method == 'OPTIONS':
+        return jsonify({'message': 'Preflight OK'}), 200
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        if not data or 'powerId' not in data:
+            return jsonify({'status': 'error', 'message': 'Se requiere el ID del poder'}), 400
+        
+        power_id = data['powerId']
+        with get_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if not user:
+                return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
+            
+            if user.powers is None:
+                user.powers = []
+            
+            if power_id not in user.powers:
+                return jsonify({'status': 'error', 'message': 'El poder no está en la lista'}), 400
+            
+            updated_powers = [p for p in user.powers if p != power_id]
+            user.powers = updated_powers
+            session.commit()
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Poder eliminado correctamente',
+                'powers': user.powers
+            }), 200
+    except Exception as e:
+        logger.exception(f"Error al eliminar poder: {str(e)}")
+        return jsonify({'status': 'error', 'message': 'Error al eliminar el poder'}), 500
+
+@auth_bp.route('/plubots', methods=['POST', 'OPTIONS'])
+@jwt_required()
+def create_plubot():
+    if request.method == 'OPTIONS':
+        return jsonify({'message': 'Preflight OK'}), 200
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        powers = data.get('powers', '') if isinstance(data.get('powers'), str) else ','.join(data.get('powers', []))
+        with get_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if not user:
+                return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
+            # Guardar credenciales de Google Sheets en User
+            google_sheets_credentials = data.get('powerConfig', {}).get('google-sheets', {}).get('credentials')
+            if google_sheets_credentials:
+                user.google_sheets_credentials = google_sheets_credentials
+            plubot = Plubot(
+                name=data['name'],
+                tone=data['tone'],
+                purpose=data.get('purpose', 'asistir a los clientes'),
+                initial_message=data.get('initial_message', '¡Hola! Soy tu Plubot, aquí para ayudarte.'),
+                color=data.get('color'),
+                powers=powers,
+                user_id=user_id
+            )
+            session.add(plubot)
+            session.commit()
+            return jsonify({
+                'status': 'success',
+                'plubot': {
+                    'id': plubot.id,
+                    'name': plubot.name,
+                    'tone': plubot.tone,
+                    'color': plubot.color,
+                    'powers': plubot.powers,
+                    'purpose': plubot.purpose,
+                    'initial_message': plubot.initial_message,
+                    'created_at': plubot.created_at.isoformat() if plubot.created_at else None,
+                    'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None
+                }
+            }), 200
+    except Exception as e:
+        logger.exception(f"Error al crear Plubot: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500

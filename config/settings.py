@@ -60,6 +60,11 @@ def load_config(app):
     if not all([app.config['TWILIO_SID'], app.config['TWILIO_TOKEN'], app.config['TWILIO_PHONE']]):
         raise ValueError("Faltan credenciales de Twilio en las variables de entorno.")
 
+    # Configuración de la clave de encriptación
+    app.config['ENCRYPTION_KEY'] = os.getenv('ENCRYPTION_KEY')
+    if not app.config['ENCRYPTION_KEY']:
+        raise ValueError("No se encontró ENCRYPTION_KEY en las variables de entorno.")
+
 # Configuración de SQLAlchemy
 database_url = os.getenv('DATABASE_URL', '').replace('postgres://', 'postgresql://')
 if not database_url:

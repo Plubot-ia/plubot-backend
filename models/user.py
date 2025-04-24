@@ -23,12 +23,18 @@ class User(Base):
     level = Column(Integer, default=1)
     plucoins = Column(Integer, default=0)  # Revertido a plucoins
     
+    # Campo para los poderes
+    powers = Column(JSON, default=list, nullable=False)  # Lista de IDs de poderes
+    
     # Campos de auditoría
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # Campo para credenciales de Google Sheets
+    google_sheets_credentials = Column(Text, nullable=True)  # Para almacenar JSON de credenciales
+    
     # Relaciones
-    plubots = relationship('Chatbot', backref='user', lazy=True)
+    plubots = relationship('Plubot', backref='user', lazy=True)  # Actualizado: usar Plubot
 
     def __repr__(self):
         return f'<User {self.email}>'

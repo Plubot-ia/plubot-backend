@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from config.settings import get_session
-from models.chatbot import Chatbot
+from models.plubot import Plubot  # Actualizado: importar Plubot desde plubot.py
 from models.conversation import Conversation
 from models.flow import Flow
 from utils.helpers import check_quota, increment_quota, summarize_history
@@ -21,15 +21,15 @@ def chat(chatbot_id):
         return jsonify({'status': 'error', 'message': 'Falta el mensaje o el número de teléfono'}), 400
 
     with get_session() as session:
-        chatbot = session.query(Chatbot).filter_by(id=chatbot_id).first()
-        if not chatbot:
-            return jsonify({'status': 'error', 'message': 'Chatbot no encontrado'}), 404
+        plubot = session.query(Plubot).filter_by(id=chatbot_id).first()  # Actualizado: usar Plubot
+        if not plubot:
+            return jsonify({'status': 'error', 'message': 'Plubot no encontrado'}), 404
 
         user_id = user_phone
-        if not check_quota(chatbot.user_id, session):
+        if not check_quota(plubot.user_id, session):
             return jsonify({'status': 'error', 'message': 'Has alcanzado el límite de mensajes de este mes.'}), 429
 
-        increment_quota(chatbot.user_id, session)
+        increment_quota(plubot.user_id, session)
 
         conversation = Conversation(
             chatbot_id=chatbot_id,
@@ -62,13 +62,13 @@ def chat(chatbot_id):
 
         if not response:
             messages = [
-                {"role": "system", "content": f"Eres un chatbot {chatbot.tone} llamado '{chatbot.name}'. Tu propósito es {chatbot.purpose}."},
+                {"role": "system", "content": f"Eres un plubot {plubot.tone} llamado '{plubot.name}'. Tu propósito es {plubot.purpose}."},  # Actualizado: usar plubot
                 {"role": "user", "content": f"Historial: {summarize_history(history)}\nMensaje: {user_message}"}
             ]
-            if chatbot.business_info:
-                messages[0]["content"] += f"\nNegocio: {chatbot.business_info}"
-            if chatbot.pdf_content:
-                messages[0]["content"] += f"\nContenido del PDF: {chatbot.pdf_content}"
+            if plubot.business_info:
+                messages[0]["content"] += f"\nNegocio: {plubot.business_info}"
+            if plubot.pdf_content:
+                messages[0]["content"] += f"\nContenido del PDF: {plubot.pdf_content}"
             response = call_grok(messages, max_tokens=150)
 
         bot_conversation = Conversation(
@@ -89,9 +89,9 @@ def conversation_history(chatbot_id):
 
     user_id = get_jwt_identity()
     with get_session() as session:
-        chatbot = session.query(Chatbot).filter_by(id=chatbot_id, user_id=user_id).first()
-        if not chatbot:
-            return jsonify({'status': 'error', 'message': 'Chatbot no encontrado o no tienes permisos'}), 404
+        plubot = session.query(Plubot).filter_by(id=chatbot_id, user_id=user_id).first()  # Actualizado: usar Plubot
+        if not plubot:
+            return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
 
         history = session.query(Conversation).filter_by(chatbot_id=chatbot_id).order_by(Conversation.timestamp.asc()).all()
         history_list = [{'role': conv.role, 'message': conv.message, 'timestamp': conv.timestamp.isoformat()} for conv in history]

@@ -1,0 +1,64 @@
+plubot-backend/
+├── alembic.ini
+├── app.py ✅ actualizado con blueprint integrations
+├── celery_tasks.py
+├── dump.rdb
+├── estructura_carpetas.py
+├── plubot.log
+├── render.yaml
+├── requirements.txt
+├── TESTERS/
+│   ├── fix_all_users.py
+│   ├── fix_user.py
+│   ├── generar_clave.py
+│   ├── reset_password_test2.py
+│   ├── test_smtp.py
+│   ├── verify_reset_test3.py
+│   ├── verify_test_user.py
+│   └── verify_user.py
+├── api/
+│   ├── __init__.py
+│   ├── auth.py
+│   ├── contact.py
+│   ├── conversations.py
+│   ├── grok.py
+│   ├── integrations.py ✅ NUEVO — endpoints Google Sheets, Notion, Trello
+│   ├── plubots.py
+│   ├── quotas.py
+│   ├── subscribe.py
+│   ├── templates.py
+│   ├── webhook.py
+│   └── whatsapp.py ✅ actualizado con blueprint integrations
+├── config/
+│   ├── __init__.py
+│   ├── celery_config.py
+│   └── settings.py
+├── instance/
+├── migrations/
+│   ├── README
+│   ├── alembic.ini
+│   ├── env.py
+│   ├── script.py.mako
+│   └── versions/
+├── models/
+│   ├── __init__.py
+│   ├── conversation.py
+│   ├── flow.py
+│   ├── flow_edge.py
+│   ├── message_quota.py
+│   ├── plubot.py
+│   ├── template.py
+│   └── user.py
+├── services/
+│   ├── __init__.py
+│   ├── grok_service.py
+│   ├── mail_service.py
+│   ├── pdf_service.py
+│   ├── redis_service.py
+│   └── twilio_service.py
+├── utils/
+│   ├── __init__.py
+│   ├── helpers.py
+│   ├── logging.py
+│   ├── templates.py
+│   └── validators.py

@@ -8,4 +8,4 @@ Base = db.Model
 
 # Importar modelos para que Flask-Migrate los detecte
 from .user import User
-from .chatbot import Chatbot
+from .plubot import Plubot  # Actualizado: importar Plubot desde plubot.py

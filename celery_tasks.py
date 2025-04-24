@@ -4,7 +4,7 @@ import requests
 import PyPDF2
 import logging
 from config.settings import get_session
-from models.chatbot import Chatbot
+from models.plubot import Plubot  # Actualizado: importar Plubot desde plubot.py
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +56,8 @@ def process_pdf_async(chatbot_id, pdf_url):
     with get_session() as session:
         response = requests.get(pdf_url)
         pdf_content = extract_text_from_pdf(response.content)
-        chatbot = session.query(Chatbot).filter_by(id=chatbot_id).first()
-        if chatbot:
-            chatbot.pdf_content = pdf_content
+        plubot = session.query(Plubot).filter_by(id=chatbot_id).first()  # Actualizado: usar Plubot
+        if plubot:
+            plubot.pdf_content = pdf_content
             session.commit()
-        logger.info(f"PDF procesado para chatbot {chatbot_id}")
+        logger.info(f"PDF procesado para plubot {chatbot_id}")  # Actualizado: mensaje de log

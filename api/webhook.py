@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, Response
 from config.settings import get_session
-from models.chatbot import Chatbot
+from models.plubot import Plubot  # Actualizado: importar Plubot desde plubot.py
 from models.conversation import Conversation
 from models.flow import Flow
 from utils.helpers import check_quota, increment_quota, summarize_history
@@ -23,37 +23,37 @@ def webhook(chatbot_id):
         return jsonify({'status': 'error', 'message': 'Falta el número o el mensaje'}), 400
 
     with get_session() as session:
-        chatbot = session.query(Chatbot).filter_by(id=chatbot_id).first()
-        if not chatbot:
-            logger.warning(f"Chatbot {chatbot_id} no encontrado")
-            return jsonify({'status': 'error', 'message': 'Chatbot no encontrado'}), 404
+        plubot = session.query(Plubot).filter_by(id=chatbot_id).first()  # Actualizado: usar Plubot
+        if not plubot:
+            logger.warning(f"Plubot {chatbot_id} no encontrado")  # Actualizado: mensaje de log
+            return jsonify({'status': 'error', 'message': 'Plubot no encontrado'}), 404
 
-        if not chatbot.whatsapp_number:
-            logger.warning(f"Chatbot {chatbot_id} no tiene número de WhatsApp configurado")
+        if not plubot.whatsapp_number:
+            logger.warning(f"Plubot {chatbot_id} no tiene número de WhatsApp configurado")  # Actualizado: mensaje de log
             return Response(status=404)
 
-        if chatbot.whatsapp_number != from_number.replace('whatsapp:', ''):
+        if plubot.whatsapp_number != from_number.replace('whatsapp:', ''):
             logger.warning(f"Número no coincide: {from_number}")
             return jsonify({'status': 'error', 'message': 'Número de WhatsApp no coincide'}), 403
 
         user_id = from_number
 
         if user_message.lower() == 'verificar':
-            chatbot.is_verified = True
+            plubot.is_verified = True  # Actualizado: usar plubot
             session.commit()
             twilio_client.messages.create(
-                body="¡Número verificado! Tu chatbot está listo para usar.",
+                body="¡Número verificado! Tu plubot está listo para usar.",  # Actualizado: mensaje
                 from_=f'whatsapp:{TWILIO_PHONE}',
                 to=from_number
             )
             return jsonify({'status': 'success', 'message': 'Verificado'}), 200
 
-        if not check_quota(chatbot.user_id, session):
+        if not check_quota(plubot.user_id, session):
             twilio_response = MessagingResponse()
             twilio_response.message("Has alcanzado el límite de mensajes de este mes. Actualiza tu plan para continuar.")
             return Response(str(twilio_response), mimetype='text/xml')
 
-        increment_quota(chatbot.user_id, session)
+        increment_quota(plubot.user_id, session)
 
         conversation = Conversation(
             chatbot_id=chatbot_id,
@@ -76,13 +76,13 @@ def webhook(chatbot_id):
 
         if not response:
             messages = [
-                {"role": "system", "content": f"Eres un chatbot {chatbot.tone} llamado '{chatbot.name}'. Tu propósito es {chatbot.purpose}."},
+                {"role": "system", "content": f"Eres un plubot {plubot.tone} llamado '{plubot.name}'. Tu propósito es {plubot.purpose}."},  # Actualizado: usar plubot
                 {"role": "user", "content": f"Historial: {summarize_history(history)}\nMensaje: {user_message}"}
             ]
-            if chatbot.business_info:
-                messages[0]["content"] += f"\nNegocio: {chatbot.business_info}"
-            if chatbot.pdf_content:
-                messages[0]["content"] += f"\nContenido del PDF: {chatbot.pdf_content}"
+            if plubot.business_info:
+                messages[0]["content"] += f"\nNegocio: {plubot.business_info}"
+            if plubot.pdf_content:
+                messages[0]["content"] += f"\nContenido del PDF: {plubot.pdf_content}"
             response = call_grok(messages, max_tokens=150)
 
         bot_conversation = Conversation(

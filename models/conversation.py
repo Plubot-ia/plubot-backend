@@ -5,7 +5,7 @@ from models import Base
 class Conversation(Base):
     __tablename__ = 'conversations'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    chatbot_id = Column(Integer, ForeignKey('chatbots.id'), nullable=False)
+    chatbot_id = Column(Integer, ForeignKey('plubots.id'), nullable=False)  # Actualizado: referenciar plubots.id
     user_id = Column(String, nullable=False)
     message = Column(Text, nullable=False)
     role = Column(String, nullable=False)

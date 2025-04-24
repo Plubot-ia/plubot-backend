@@ -4,7 +4,7 @@ from models import Base
 class Flow(Base):
     __tablename__ = 'flows'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    chatbot_id = Column(Integer, ForeignKey('chatbots.id'), nullable=False)
+    chatbot_id = Column(Integer, ForeignKey('plubots.id'), nullable=False)  # Actualizado: referenciar plubots.id
     user_message = Column(Text, nullable=False)
     bot_response = Column(Text, nullable=False)
     position = Column(Integer, nullable=False)

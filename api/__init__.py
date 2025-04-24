@@ -4,7 +4,7 @@ api_bp = Blueprint('api', __name__)
 
 # Importar y registrar blueprints
 from .auth import auth_bp
-from .chatbots import chatbots_bp
+from .plubots import plubots_bp
 from .conversations import conversations_bp
 from .quotas import quotas_bp
 from .templates import templates_bp
@@ -16,7 +16,7 @@ from .whatsapp import whatsapp_bp
 
 # Registrar blueprints con prefijos explícitos
 api_bp.register_blueprint(auth_bp, url_prefix='/auth')
-api_bp.register_blueprint(chatbots_bp, url_prefix='/chatbots')
+api_bp.register_blueprint(plubots_bp, url_prefix='/plubots')
 api_bp.register_blueprint(conversations_bp, url_prefix='/conversations')
 api_bp.register_blueprint(quotas_bp, url_prefix='/quotas')
 api_bp.register_blueprint(templates_bp, url_prefix='/templates')

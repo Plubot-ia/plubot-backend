@@ -2,8 +2,8 @@ from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime
 from models import Base
 from datetime import datetime
 
-class Chatbot(Base):
-    __tablename__ = 'chatbots'
+class Plubot(Base):
+    __tablename__ = 'plubots'  # Actualizado: cambiar el nombre de la tabla a 'plubots'
     
     # Campos existentes
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -22,5 +22,9 @@ class Chatbot(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Nuevos campos para color y powers
+    color = Column(String, nullable=True)  # Para almacenar el color en formato hexadecimal, ej. "#00e0ff"
+    powers = Column(String, nullable=True)  # Para almacenar los poderes como una cadena separada por comas
+
     def __repr__(self):
-        return f'<Chatbot {self.name}>'
+        return f'<Plubot {self.name}>'
