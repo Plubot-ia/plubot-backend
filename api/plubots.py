@@ -5,7 +5,7 @@ from models.plubot import Plubot
 from models.flow import Flow
 from models.flow_edge import FlowEdge
 from models.template import Template
-from models.user import User  # Importar User
+from models.user import User
 from utils.validators import FlowModel
 from utils.helpers import parse_menu_to_flows
 from services.grok_service import call_grok
@@ -37,7 +37,15 @@ def create_bot():
     edges_raw = data.get('edges', [])
     template_id = data.get('template_id')
     menu_json = data.get('menu_json')
-    power_config = data.get('powerConfig', {})  # Obtener powerConfig
+    power_config = data.get('powerConfig', {})
+    # Nuevos campos
+    plan_type = data.get('plan_type', 'free')
+    avatar = data.get('avatar')
+    menu_options = data.get('menu_options', [])
+    response_limit = data.get('response_limit', 100)
+    conversation_count = data.get('conversation_count', 0)
+    message_count = data.get('message_count', 0)
+    is_webchat_enabled = data.get('is_webchat_enabled', True)
 
     if not name:
         return jsonify({'status': 'error', 'message': 'El nombre del plubot es obligatorio'}), 400
@@ -66,7 +74,7 @@ def create_bot():
             flows.append(validated_flow.dict())
         except Exception as e:
             logger.error(f"Flujo inválido en posición {index}: {str(e)}")
-            return jsonify({'status': 'error', 'message': f'Flujo inválido en la posición {index}: {str(e)}'}), 400
+            return jsonify({'status': 'error', 'message': f'Flujo inválido en posición {index}: {str(e)}'}), 400
 
     with get_session() as session:
         try:
@@ -105,12 +113,19 @@ def create_bot():
                 image_url=image_url,
                 user_id=user_id,
                 color=color,
-                powers=','.join(powers) if powers else None
+                powers=powers,
+                plan_type=plan_type,
+                avatar=avatar,
+                menu_options=menu_options,
+                response_limit=response_limit,
+                conversation_count=conversation_count,
+                message_count=message_count,
+                is_webchat_enabled=is_webchat_enabled,
+                power_config=power_config
             )
             session.add(plubot)
-            session.flush()  # Obtener plubot.id antes de commit
+            session.flush()
 
-            # Guardar google_sheets_credentials si se proporcionan
             if power_config.get('google-sheets', {}).get('credentials'):
                 user = session.query(User).filter_by(id=user_id).first()
                 if user:
@@ -164,18 +179,128 @@ def create_bot():
                     'tone': plubot.tone,
                     'purpose': plubot.purpose,
                     'color': plubot.color,
-                    'powers': plubot.powers.split(',') if plubot.powers else [],
+                    'powers': plubot.powers,
                     'whatsapp_number': plubot.whatsapp_number,
                     'initial_message': plubot.initial_message,
                     'business_info': plubot.business_info,
                     'pdf_url': plubot.pdf_url,
                     'image_url': plubot.image_url,
                     'created_at': plubot.created_at.isoformat() if plubot.created_at else None,
-                    'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None
+                    'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None,
+                    'plan_type': plubot.plan_type,
+                    'avatar': plubot.avatar,
+                    'menu_options': plubot.menu_options,
+                    'response_limit': plubot.response_limit,
+                    'conversation_count': plubot.conversation_count,
+                    'message_count': plubot.message_count,
+                    'is_webchat_enabled': plubot.is_webchat_enabled,
+                    'power_config': plubot.power_config
                 }
             }), 200
         except Exception as e:
             logger.exception(f"Error al crear plubot: {str(e)}")
+            session.rollback()
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@plubots_bp.route('/create_despierto', methods=['POST'])
+@jwt_required()
+def create_despierto_bot():
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    if not data:
+        return jsonify({'status': 'error', 'message': 'No se proporcionaron datos'}), 400
+
+    name = data.get('name')
+    tone = data.get('tone', 'amigable')  # Clásico, Cool vulnerability or weakness.
+    personality = data.get('personality', 'clasico')  # Clásico, Cool, Ninja
+    purpose = data.get('purpose', 'ayudar a los clientes')
+    avatar = data.get('avatar', 'default_avatar.png')
+    menu_options = data.get('menu_options', [])
+
+    if not name:
+        return jsonify({'status': 'error', 'message': 'El nombre del plubot es obligatorio'}), 400
+
+    if len(menu_options) > 3:
+        return jsonify({'status': 'error', 'message': 'Máximo 3 opciones de menú permitidas'}), 400
+
+    for option in menu_options:
+        if not option.get('label') or not option.get('action'):
+            return jsonify({'status': 'error', 'message': 'Cada opción de menú debe tener un label y una acción'}), 400
+
+    with get_session() as session:
+        try:
+            system_message = f"Eres un plubot {tone} llamado '{name}' con personalidad {personality}. Tu propósito es {purpose}."
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": "Dame un mensaje de bienvenida."}
+            ]
+            initial_message = call_grok(messages, max_tokens=100)
+
+            plubot = Plubot(
+                name=name,
+                tone=tone,
+                purpose=purpose,
+                initial_message=initial_message,
+                user_id=user_id,
+                plan_type='free',
+                avatar=avatar,
+                menu_options=menu_options,
+                response_limit=100,
+                conversation_count=0,
+                message_count=0,
+                is_webchat_enabled=True,
+                power_config={}
+            )
+            session.add(plubot)
+            session.commit()
+            plubot_id = plubot.id
+
+            flows = []
+            for index, option in enumerate(menu_options):
+                flows.append({
+                    'user_message': option['label'].lower(),
+                    'bot_response': f"Has seleccionado {option['label']}. ¿Cómo puedo ayudarte con esto?",
+                    'position': index,
+                    'intent': 'menu_option',
+                    'condition': ''
+                })
+
+            flow_id_map = {}
+            for index, flow in enumerate(flows):
+                flow_entry = Flow(
+                    chatbot_id=plubot_id,
+                    user_message=flow['user_message'],
+                    bot_response=flow['bot_response'],
+                    position=index,
+                    intent=flow['intent'],
+                    condition=flow['condition']
+                )
+                session.add(flow_entry)
+                session.flush()
+                flow_id_map[str(index)] = flow_entry.id
+
+            session.commit()
+            return jsonify({
+                'status': 'success',
+                'message': f"Plubot Despierto '{name}' creado con éxito. ID: {plubot_id}.",
+                'plubot': {
+                    'id': plubot.id,
+                    'name': plubot.name,
+                    'tone': plubot.tone,
+                    'purpose': plubot.purpose,
+                    'initial_message': plubot.initial_message,
+                    'plan_type': plubot.plan_type,
+                    'avatar': plubot.avatar,
+                    'menu_options': plubot.menu_options,
+                    'response_limit': plubot.response_limit,
+                    'conversation_count': plubot.conversation_count,
+                    'message_count': plubot.message_count,
+                    'is_webchat_enabled': plubot.is_webchat_enabled,
+                    'power_config': plubot.power_config
+                }
+            }), 200
+        except Exception as e:
+            logger.exception(f"Error al crear Plubot Despierto: {str(e)}")
             session.rollback()
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -194,14 +319,22 @@ def list_bots():
                 'tone': bot.tone,
                 'purpose': bot.purpose,
                 'color': bot.color,
-                'powers': bot.powers.split(',') if bot.powers else [],
+                'powers': bot.powers,
                 'whatsapp_number': bot.whatsapp_number,
                 'initial_message': bot.initial_message,
                 'business_info': bot.business_info,
                 'pdf_url': bot.pdf_url,
                 'image_url': bot.image_url,
                 'created_at': bot.created_at.isoformat() if bot.created_at else None,
-                'updated_at': bot.updated_at.isoformat() if bot.updated_at else None
+                'updated_at': bot.updated_at.isoformat() if bot.updated_at else None,
+                'plan_type': bot.plan_type,
+                'avatar': bot.avatar,
+                'menu_options': bot.menu_options,
+                'response_limit': bot.response_limit,
+                'conversation_count': bot.conversation_count,
+                'message_count': bot.message_count,
+                'is_webchat_enabled': bot.is_webchat_enabled,
+                'power_config': bot.power_config
             } for bot in plubots
         ]
         return jsonify({'plubots': plubots_data}), 200
@@ -229,7 +362,14 @@ def update_bot(plubot_id):
     edges_raw = data.get('edges', [])
     template_id = data.get('template_id')
     menu_json = data.get('menu_json')
-    power_config = data.get('powerConfig', {})  # Obtener powerConfig
+    power_config = data.get('powerConfig', {})
+    plan_type = data.get('plan_type')
+    avatar = data.get('avatar')
+    menu_options = data.get('menu_options')
+    response_limit = data.get('response_limit')
+    conversation_count = data.get('conversation_count')
+    message_count = data.get('message_count')
+    is_webchat_enabled = data.get('is_webchat_enabled')
 
     if not name:
         return jsonify({'status': 'error', 'message': 'El nombre del plubot es obligatorio'}), 400
@@ -257,7 +397,7 @@ def update_bot(plubot_id):
             flows.append(validated_flow.dict())
         except Exception as e:
             logger.error(f"Flujo inválido en posición {index}: {str(e)}")
-            return jsonify({'status': 'error', 'message': f'Flujo inválido en la posición {index}: {str(e)}'}), 400
+            return jsonify({'status': 'error', 'message': f'Flujo inválido en posición {index}: {str(e)}'}), 400
 
     with get_session() as session:
         plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
@@ -272,7 +412,7 @@ def update_bot(plubot_id):
         if color is not None:
             plubot.color = color
         if powers:
-            plubot.powers = ','.join(powers)
+            plubot.powers = powers
         if whatsapp_number:
             plubot.whatsapp_number = whatsapp_number
         if business_info is not None:
@@ -282,8 +422,23 @@ def update_bot(plubot_id):
             process_pdf_async.delay(plubot_id, pdf_url)
         if image_url is not None:
             plubot.image_url = image_url
+        if power_config:
+            plubot.power_config = power_config
+        if plan_type:
+            plubot.plan_type = plan_type
+        if avatar is not None:
+            plubot.avatar = avatar
+        if menu_options is not None:
+            plubot.menu_options = menu_options
+        if response_limit is not None:
+            plubot.response_limit = response_limit
+        if conversation_count is not None:
+            plubot.conversation_count = conversation_count
+        if message_count is not None:
+            plubot.message_count = message_count
+        if is_webchat_enabled is not None:
+            plubot.is_webchat_enabled = is_webchat_enabled
 
-        # Guardar google_sheets_credentials si se proporcionan
         if power_config.get('google-sheets', {}).get('credentials'):
             user = session.query(User).filter_by(id=user_id).first()
             if user:
@@ -347,14 +502,22 @@ def update_bot(plubot_id):
                 'tone': plubot.tone,
                 'purpose': plubot.purpose,
                 'color': plubot.color,
-                'powers': plubot.powers.split(',') if plubot.powers else [],
+                'powers': plubot.powers,
                 'whatsapp_number': plubot.whatsapp_number,
                 'initial_message': plubot.initial_message,
                 'business_info': plubot.business_info,
                 'pdf_url': plubot.pdf_url,
                 'image_url': plubot.image_url,
                 'created_at': plubot.created_at.isoformat() if plubot.created_at else None,
-                'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None
+                'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None,
+                'plan_type': plubot.plan_type,
+                'avatar': plubot.avatar,
+                'menu_options': plubot.menu_options,
+                'response_limit': plubot.response_limit,
+                'conversation_count': plubot.conversation_count,
+                'message_count': plubot.message_count,
+                'is_webchat_enabled': plubot.is_webchat_enabled,
+                'power_config': plubot.power_config
             }
         }), 200
 

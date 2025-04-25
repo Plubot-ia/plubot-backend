@@ -8,4 +8,9 @@ Base = db.Model
 
 # Importar modelos para que Flask-Migrate los detecte
 from .user import User
-from .plubot import Plubot  # Actualizado: importar Plubot desde plubot.py
+from .plubot import Plubot
+from .conversation import Conversation
+from .flow import Flow
+from .flow_edge import FlowEdge
+from .template import Template
+from .message_quota import MessageQuota

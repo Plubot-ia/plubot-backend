@@ -310,7 +310,9 @@ def update_profile():
         logger.exception(f"Error en /profile (PUT): {str(e)}")
         return jsonify({'status': 'error', 'message': 'Error al actualizar el perfil'}), 500
 
-@auth_bp.route('/profile/powers', methods=['POST', 'OPTIONS'])
+@auth_bp.route('/profile/powers', methods
+
+=['POST', 'OPTIONS'])
 @jwt_required()
 def add_power():
     if request.method == 'OPTIONS':
@@ -430,3 +432,55 @@ def create_plubot():
     except Exception as e:
         logger.exception(f"Error al crear Plubot: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@auth_bp.route('/profile/plubots', methods=['DELETE', 'OPTIONS'])
+@jwt_required()
+def delete_plubot():
+    if request.method == 'OPTIONS':
+        return jsonify({'message': 'Preflight OK'}), 200
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        if not data or 'plubotId' not in data:
+            return jsonify({'status': 'error', 'message': 'Se requiere el ID del Plubot'}), 400
+        
+        plubot_id = data['plubotId']
+        with get_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if not user:
+                return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
+            
+            plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+            if not plubot:
+                return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no pertenece al usuario.'}), 404
+            
+            session.delete(plubot)
+            session.commit()
+            
+            # Obtener la lista actualizada de Plubots
+            updated_plubots = [
+                {
+                    'id': bot.id,
+                    'name': bot.name,
+                    'tone': bot.tone,
+                    'purpose': bot.purpose,
+                    'whatsapp_number': bot.whatsapp_number,
+                    'initial_message': bot.initial_message,
+                    'business_info': bot.business_info,
+                    'pdf_url': bot.pdf_url,
+                    'image_url': bot.image_url,
+                    'created_at': bot.created_at.isoformat() if bot.created_at else None,
+                    'updated_at': bot.updated_at.isoformat() if bot.updated_at else None,
+                    'color': bot.color,
+                    'powers': bot.powers
+                } for bot in user.plubots
+            ]
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'Plubot eliminado correctamente',
+                'plubots': updated_plubots
+            }), 200
+    except Exception as e:
+        logger.exception(f"Error al eliminar Plubot: {str(e)}")
+        return jsonify({'status': 'error', 'message': 'Error al eliminar el Plubot'}), 500

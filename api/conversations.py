@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from config.settings import get_session
-from models.plubot import Plubot  # Actualizado: importar Plubot desde plubot.py
+from models.plubot import Plubot
 from models.conversation import Conversation
 from models.flow import Flow
 from utils.helpers import check_quota, increment_quota, summarize_history
@@ -21,9 +21,12 @@ def chat(chatbot_id):
         return jsonify({'status': 'error', 'message': 'Falta el mensaje o el número de teléfono'}), 400
 
     with get_session() as session:
-        plubot = session.query(Plubot).filter_by(id=chatbot_id).first()  # Actualizado: usar Plubot
+        plubot = session.query(Plubot).filter_by(id=chatbot_id).first()
         if not plubot:
             return jsonify({'status': 'error', 'message': 'Plubot no encontrado'}), 404
+
+        if not plubot.is_webchat_enabled:
+            return jsonify({'status': 'error', 'message': 'El webchat no está habilitado para este Plubot'}), 403
 
         user_id = user_phone
         if not check_quota(plubot.user_id, session):
@@ -31,6 +34,11 @@ def chat(chatbot_id):
 
         increment_quota(plubot.user_id, session)
 
+        # Obtener historial para determinar si es la primera interacción
+        history = session.query(Conversation).filter_by(chatbot_id=chatbot_id, user_id=user_id).order_by(Conversation.timestamp.asc()).all()
+        is_first_interaction = len(history) == 0
+
+        # Guardar el mensaje del usuario
         conversation = Conversation(
             chatbot_id=chatbot_id,
             user_id=user_id,
@@ -40,37 +48,53 @@ def chat(chatbot_id):
         session.add(conversation)
         session.commit()
 
-        history = session.query(Conversation).filter_by(chatbot_id=chatbot_id, user_id=user_id).order_by(Conversation.timestamp.asc()).all()
-        flows = session.query(Flow).filter_by(chatbot_id=chatbot_id).order_by(Flow.position.asc()).all()
-
-        user_msg_lower = user_message.lower()
+        # Preparar respuesta y botones
         response = None
-        for flow in flows:
-            if user_msg_lower == flow.user_message.lower():
-                response = flow.bot_response
-                # Manejar acciones (payment_link, schedule_link)
-                actions = []  # Asumimos que Flow tiene un campo actions; ajustar según modelo
-                if hasattr(flow, 'actions') and flow.actions:
-                    for action in flow.actions:
-                        if action['type'] == 'payment_link':
-                            amount = float(action['value'])
-                            payment_url = f"https://example.com/pay?amount={amount}"  # Reemplazar con Stripe
-                            response += f"\nPaga aquí: {payment_url}"
-                        elif action['type'] == 'schedule_link':
-                            response += f"\nAgenda una cita: {action['value']}"
-                break
+        buttons = plubot.menu_options if plubot.menu_options else []
 
-        if not response:
-            messages = [
-                {"role": "system", "content": f"Eres un plubot {plubot.tone} llamado '{plubot.name}'. Tu propósito es {plubot.purpose}."},  # Actualizado: usar plubot
-                {"role": "user", "content": f"Historial: {summarize_history(history)}\nMensaje: {user_message}"}
-            ]
-            if plubot.business_info:
-                messages[0]["content"] += f"\nNegocio: {plubot.business_info}"
-            if plubot.pdf_content:
-                messages[0]["content"] += f"\nContenido del PDF: {plubot.pdf_content}"
-            response = call_grok(messages, max_tokens=150)
+        # Primera interacción: enviar mensaje inicial
+        if is_first_interaction:
+            response = plubot.initial_message
+        else:
+            # Buscar coincidencia en menu_options
+            user_msg_lower = user_message.lower()
+            for option in plubot.menu_options:
+                if user_msg_lower == option.get('label', '').lower():
+                    response = f"Has seleccionado {option['label']}. ¿Cómo puedo ayudarte con esto?"
+                    break
 
+            # Si no hay coincidencia en menu_options, buscar en flujos
+            if not response:
+                flows = session.query(Flow).filter_by(chatbot_id=chatbot_id).order_by(Flow.position.asc()).all()
+                for flow in flows:
+                    if user_msg_lower == flow.user_message.lower():
+                        response = flow.bot_response
+                        # Manejar acciones (payment_link, schedule_link)
+                        actions = []  # Asumimos que Flow tiene un campo actions; ajustar según modelo
+                        if hasattr(flow, 'actions') and flow.actions:
+                            for action in flow.actions:
+                                if action['type'] == 'payment_link':
+                                    amount = float(action['value'])
+                                    payment_url = f"https://example.com/pay?amount={amount}"  # Reemplazar con Stripe
+                                    response += f"\nPaga aquí: {payment_url}"
+                                elif action['type'] == 'schedule_link':
+                                    response += f"\nAgenda una cita: {action['value']}"
+                        break
+
+            # Si no hay coincidencia, usar Grok
+            if not response:
+                system_message = f"Eres un plubot {plubot.tone} llamado '{plubot.name}'. Tu propósito es {plubot.purpose}."
+                if plubot.business_info:
+                    system_message += f"\nNegocio: {plubot.business_info}"
+                if plubot.pdf_content:
+                    system_message += f"\nContenido del PDF: {plubot.pdf_content}"
+                messages = [
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": f"Historial: {summarize_history(history)}\nMensaje: {user_message}"}
+                ]
+                response = call_grok(messages, max_tokens=150)
+
+        # Guardar la respuesta del bot
         bot_conversation = Conversation(
             chatbot_id=chatbot_id,
             user_id=user_id,
@@ -79,7 +103,17 @@ def chat(chatbot_id):
         )
         session.add(bot_conversation)
         session.commit()
-        return jsonify({'response': response})
+
+        # Incrementar estadísticas
+        plubot.message_count += 1
+        if is_first_interaction:
+            plubot.conversation_count += 1
+        session.commit()
+
+        return jsonify({
+            'response': response,
+            'buttons': buttons  # Enviar opciones de menú como botones
+        })
 
 @conversations_bp.route('/<int:chatbot_id>/history', methods=['GET', 'OPTIONS'])
 @jwt_required()
@@ -89,7 +123,7 @@ def conversation_history(chatbot_id):
 
     user_id = get_jwt_identity()
     with get_session() as session:
-        plubot = session.query(Plubot).filter_by(id=chatbot_id, user_id=user_id).first()  # Actualizado: usar Plubot
+        plubot = session.query(Plubot).filter_by(id=chatbot_id, user_id=user_id).first()
         if not plubot:
             return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
 

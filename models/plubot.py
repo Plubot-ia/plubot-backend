@@ -1,9 +1,9 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, JSON, Boolean
 from models import Base
 from datetime import datetime
 
 class Plubot(Base):
-    __tablename__ = 'plubots'  # Actualizado: cambiar el nombre de la tabla a 'plubots'
+    __tablename__ = 'plubots'
     
     # Campos existentes
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -18,13 +18,23 @@ class Plubot(Base):
     image_url = Column(String, nullable=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
     
-    # Nuevos campos de auditoría
+    # Campos de auditoría
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Nuevos campos para color y powers
+    # Campos existentes actualizados
     color = Column(String, nullable=True)  # Para almacenar el color en formato hexadecimal, ej. "#00e0ff"
-    powers = Column(String, nullable=True)  # Para almacenar los poderes como una cadena separada por comas
+    powers = Column(JSON, nullable=True, default=list)  # Lista de poderes en JSON
+    
+    # Nuevos campos para Plubot Despierto
+    plan_type = Column(String, nullable=True, default='free')  # 'free' o 'premium'
+    avatar = Column(String, nullable=True)  # URL o nombre del avatar
+    menu_options = Column(JSON, nullable=True, default=list)  # Hasta 3 botones: [{label: str, action: str}]
+    response_limit = Column(Integer, nullable=True, default=100)  # Límite de 100 respuestas/mes
+    conversation_count = Column(Integer, nullable=True, default=0)  # Estadísticas básicas
+    message_count = Column(Integer, nullable=True, default=0)  # Estadísticas básicas
+    is_webchat_enabled = Column(Boolean, nullable=True, default=True)  # Solo chat web
+    power_config = Column(JSON, nullable=True, default=dict)  # Configuración de poderes
 
     def __repr__(self):
         return f'<Plubot {self.name}>'

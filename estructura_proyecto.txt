@@ -3,7 +3,7 @@ plubot-backend/
 ├── app.py ✅ actualizado con blueprint integrations
 ├── celery_tasks.py
 ├── dump.rdb
-├── estructura_carpetas.py
+├── e.py
 ├── plubot.log
 ├── render.yaml
 ├── requirements.txt
