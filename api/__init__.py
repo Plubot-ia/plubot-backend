@@ -23,5 +23,5 @@ api_bp.register_blueprint(templates_bp, url_prefix='/templates')
 api_bp.register_blueprint(webhook_bp, url_prefix='/webhook')
 api_bp.register_blueprint(contact_bp, url_prefix='/contact')
 api_bp.register_blueprint(subscribe_bp, url_prefix='/subscribe')
-api_bp.register_blueprint(grok_bp, url_prefix='/grok')
+api_bp.register_blueprint(grok_bp)  # Sin prefijo /grok
 api_bp.register_blueprint(whatsapp_bp, url_prefix='/whatsapp')

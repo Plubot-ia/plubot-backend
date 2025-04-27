@@ -1,3 +1,4 @@
+# plubot-backend/models/__init__.py
 from flask_sqlalchemy import SQLAlchemy
 
 # Instancia de SQLAlchemy
@@ -14,3 +15,4 @@ from .flow import Flow
 from .flow_edge import FlowEdge
 from .template import Template
 from .message_quota import MessageQuota
+from .knowledge_item import KnowledgeItem  # Añadir esta línea

@@ -13,6 +13,7 @@ from utils.logging import setup_logging
 from utils.templates import load_initial_templates
 from api import api_bp
 from models import db
+from api.grok import grok_bp  # Corregido para importar desde api/
 
 # Configuración de logging
 setup_logging()
@@ -56,10 +57,9 @@ def handle_auth_error(e):
     logger.warning(f"Error de autenticación: {str(e)}")
     return jsonify({'status': 'error', 'message': 'No autorizado'}), 401
 
-# Registro del blueprint de la API principal
+# Registro de blueprints
 app.register_blueprint(api_bp, url_prefix='/api')
-
-# Registro del nuevo blueprint de integraciones
+app.register_blueprint(grok_bp, url_prefix='/api')
 from api.integrations import integrations_bp
 app.register_blueprint(integrations_bp, url_prefix='/api/integrations')
 
@@ -76,5 +76,6 @@ def catch_all(path):
 # Solo cuando se ejecuta directamente
 if __name__ == '__main__':
     with app.app_context():
+        db.create_all()
         load_initial_templates()
     app.run(host='0.0.0.0', port=5000, debug=True)

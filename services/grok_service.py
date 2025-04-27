@@ -10,7 +10,6 @@ from redis.retry import Retry
 from redis.backoff import ExponentialBackoff
 import os
 
-
 logger = logging.getLogger(__name__)
 
 # Configuración de Redis
@@ -62,9 +61,9 @@ def ensure_redis_connection(max_attempts=3):
 
 @sleep_and_retry
 @limits(calls=50, period=60)
-def call_grok(messages, max_tokens=150):
-    if len(messages) > 4:
-        messages = [messages[0]] + messages[-3:]
+def call_grok(messages, max_tokens=150, temperature=0.5):
+    if len(messages) > 10:
+        messages = [messages[0]] + messages[-9:]
 
     cache_key = json.dumps(messages)
     result = None
@@ -80,7 +79,7 @@ def call_grok(messages, max_tokens=150):
 
     url = "https://api.x.ai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {os.getenv('XAI_API_KEY')}", "Content-Type": "application/json"}
-    payload = {"model": "grok-2-1212", "messages": messages, "temperature": 0.5, "max_tokens": max_tokens}
+    payload = {"model": "grok-3", "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         response.raise_for_status()
