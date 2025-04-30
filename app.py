@@ -13,7 +13,7 @@ from utils.logging import setup_logging
 from utils.templates import load_initial_templates
 from api import api_bp
 from models import db
-from api.grok import grok_bp  # Corregido para importar desde api/
+from api.grok import grok_bp
 
 # Configuración de logging
 setup_logging()
@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 
 # Inicialización de la app
 app = Flask(__name__)
-load_config(app)  # Carga configuraciones de instance/.env, incluyendo MAIL_*
+load_config(app)
 
 # Inicializar extensiones
 db.init_app(app)
 migrate = Migrate(app, db)
 jwt = JWTManager(app)
-mail = Mail(app)  # Inicializa Mail con configuraciones de instance/.env
+mail = Mail(app)
 
 # Configuración de CORS
 CORS(app, resources={r"/*": {
@@ -35,7 +35,8 @@ CORS(app, resources={r"/*": {
         "http://localhost:5173",
         "http://192.168.0.213:5173",
         "https://www.plubot.com",
-        "https://plubot-frontend.vercel.app"
+        "https://plubot-frontend.vercel.app",
+        "https://staging.plubot.com"
     ],
     "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
     "allow_headers": ["Content-Type", "Authorization"],
@@ -47,7 +48,7 @@ CORS(app, resources={r"/*": {
 @jwt.unauthorized_loader
 def unauthorized_response(callback):
     logger.info("Acceso no autorizado detectado")
-    return redirect('http://localhost:5173/login'), 302
+    return redirect('https://www.plubot.com/login'), 302
 
 @app.errorhandler(NoAuthorizationError)
 @app.errorhandler(Unauthorized)
@@ -65,17 +66,19 @@ app.register_blueprint(integrations_bp, url_prefix='/api/integrations')
 
 @app.route('/create', methods=['GET', 'POST'])
 def create():
-    return jsonify({'status': 'info', 'message': 'Por favor usa el frontend en http://localhost:5173/create'}), 200
+    return jsonify({'status': 'info', 'message': 'Por favor usa el frontend en https://www.plubot.com/create'}), 200
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def catch_all(path):
     logger.info(f"Solicitud atrapada en catch_all: {request.method} {path}")
-    return jsonify({'status': 'error', 'message': 'Por favor usa el frontend en http://localhost:5173'}), 404
+    return jsonify({'status': 'error', 'message': 'Este es el backend de Plubot. Usa el frontend en https://www.plubot.com'}), 404
 
 # Solo cuando se ejecuta directamente
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
         load_initial_templates()
+        logger.info(f"XAI_API_KEY: {'set' if app.config.get('XAI_API_KEY') else 'not set'}")
+        logger.info(f"REDIS_URL: {'set' if app.config.get('REDIS_URL') else 'not set'}")
     app.run(host='0.0.0.0', port=5000, debug=True)

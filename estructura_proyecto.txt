@@ -5,12 +5,14 @@ plubot-backend/
 ├── celery_tasks.py
 ├── dump.rdb
 ├── e.py
+├── estructura_proyecto.txt
 ├── plubot.log
 ├── plubot_knowledge.db
 ├── render.yaml
 ├── requirements.txt
 ├── TESTERS/
 │   ├── fix_all_users.py
+│   ├── fix_keywords.py
 │   ├── fix_user.py
 │   ├── generar_clave.py
 │   ├── reset_password_test2.py
