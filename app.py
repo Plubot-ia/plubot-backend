@@ -35,6 +35,7 @@ CORS(app, resources={r"/*": {
         "http://localhost:5173",
         "http://192.168.0.213:5173",
         "https://www.plubot.com",
+        "https://plubot.com",  # Añadido para producción
         "https://plubot-frontend.vercel.app",
         "https://staging.plubot.com"
     ],
@@ -48,7 +49,7 @@ CORS(app, resources={r"/*": {
 @jwt.unauthorized_loader
 def unauthorized_response(callback):
     logger.info("Acceso no autorizado detectado")
-    return redirect('https://www.plubot.com/login'), 302
+    return redirect('https://plubot.com/login'), 302
 
 @app.errorhandler(NoAuthorizationError)
 @app.errorhandler(Unauthorized)
@@ -66,13 +67,13 @@ app.register_blueprint(integrations_bp, url_prefix='/api/integrations')
 
 @app.route('/create', methods=['GET', 'POST'])
 def create():
-    return jsonify({'status': 'info', 'message': 'Por favor usa el frontend en https://www.plubot.com/create'}), 200
+    return jsonify({'status': 'info', 'message': 'Por favor usa el frontend en https://plubot.com/create'}), 200
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def catch_all(path):
     logger.info(f"Solicitud atrapada en catch_all: {request.method} {path}")
-    return jsonify({'status': 'error', 'message': 'Este es el backend de Plubot. Usa el frontend en https://www.plubot.com'}), 404
+    return jsonify({'status': 'error', 'message': 'Este es el backend de Plubot. Usa el frontend en https://plubot.com'}), 404
 
 # Solo cuando se ejecuta directamente
 if __name__ == '__main__':
