@@ -143,7 +143,8 @@ def forgot_password():
             logger.info(f"Emails en la base de datos: {all_emails}")
             return jsonify({'status': 'error', 'message': 'No se encontró un usuario con ese correo.'}), 400
         token = create_access_token(identity=str(user.id), expires_delta=timedelta(hours=1))
-        reset_link = f"http://localhost:5173/reset-password/{token}"
+        frontend_url = os.getenv('FRONTEND_URL', 'https://www.plubot.com')
+        reset_link = f"{frontend_url}/reset-password/{token}"
         msg = Message(
             subject="Restablecer tu contraseña",
             recipients=[email],
@@ -159,13 +160,18 @@ def reset_password(token):
     if request.method == 'GET':
         return jsonify({'status': 'error', 'message': 'Por favor usa el frontend en http://localhost:5173'}), 400
     try:
+        logger.info(f"Procesando reset_password para token: {token}")
         user_id = decode_token(token)['sub']
+        logger.info(f"User ID decodificado: {user_id}")
         with get_session() as session:
             user = session.query(User).filter_by(id=user_id).first()
             if not user:
+                logger.info(f"No se encontró usuario con ID: {user_id}")
                 return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
             new_password = request.form.get('new_password')
             confirm_password = request.form.get('confirm_password')
+            logger.info(f"New password recibido: {'****' if new_password else 'None'}")
+            logger.info(f"Confirm password recibido: {'****' if confirm_password else 'None'}")
             if not new_password or not confirm_password:
                 return jsonify({'status': 'error', 'message': 'Se requieren ambas contraseñas.'}), 400
             if new_password != confirm_password:
@@ -173,9 +179,10 @@ def reset_password(token):
             hashed_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
             user.password = hashed_password.decode('utf-8')
             session.commit()
-            logger.info(f"Contraseña actualizada para usuario {user.id}: {user.password}")
+            logger.info(f"Contraseña actualizada para usuario {user.id}")
             return jsonify({'status': 'success', 'message': 'Contraseña restablecida con éxito.'}), 200
     except ExpiredSignatureError:
+        logger.info("Token expirado")
         return jsonify({'status': 'error', 'message': 'El enlace ha expirado.'}), 400
     except Exception as e:
         logger.exception(f"Error en /reset_password: {str(e)}")
