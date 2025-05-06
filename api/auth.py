@@ -3,7 +3,8 @@ from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, creat
 from config.settings import get_session
 from models.user import User
 from models.plubot import Plubot
-from models.flow import Flow  # Agregar esta línea
+from models.flow import Flow
+from models.flow_edge import FlowEdge  # Agregar esta línea
 from utils.validators import LoginModel, RegisterModel
 import bcrypt
 from flask_mail import Mail, Message
@@ -462,8 +463,14 @@ def delete_plubot():
             if not plubot:
                 return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no pertenece al usuario.'}), 404
             
+            # Eliminar primero los flow_edges asociados a los flujos del Plubot
+            flows = session.query(Flow).filter_by(chatbot_id=plubot_id).all()
+            flow_ids = [flow.id for flow in flows]
+            if flow_ids:
+                session.query(FlowEdge).filter(FlowEdge.source_flow_id.in_(flow_ids)).delete(synchronize_session=False)
+            
             # Eliminar todos los flujos asociados al Plubot
-            session.query(Flow).filter_by(chatbot_id=plubot_id).delete()
+            session.query(Flow).filter_by(chatbot_id=plubot_id).delete(synchronize_session=False)
             
             # Eliminar el Plubot
             session.delete(plubot)
@@ -495,4 +502,9 @@ def delete_plubot():
             }), 200
     except Exception as e:
         logger.exception(f"Error al eliminar Plubot: {str(e)}")
+        if 'ForeignKeyViolation' in str(e):
+            return jsonify({
+                'status': 'error',
+                'message': 'No se puede eliminar este Plubot porque tiene flujos con conexiones activas. Por favor, elimina las conexiones primero o contacta al soporte.'
+            }), 400
         return jsonify({'status': 'error', 'message': 'Error al eliminar el Plubot'}), 500

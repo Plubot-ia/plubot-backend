@@ -437,6 +437,7 @@ def get_contextual_message(plubot_id, context):
 def update_bot(plubot_id):
     if request.method == 'OPTIONS':
         return jsonify({'message': 'Preflight OK'}), 200
+    logger.info(f"Received PUT request to update plubot_id={plubot_id}, data={request.get_json()}")
     user_id = get_jwt_identity()
     data = request.get_json()
     if not data:
@@ -497,6 +498,7 @@ def update_bot(plubot_id):
         if not plubot:
             return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
 
+        # Actualizar atributos del plubot
         plubot.name = name
         if tone:
             if tone.lower() not in PERSONALITIES:
@@ -560,26 +562,55 @@ def update_bot(plubot_id):
             menu_flows = parse_menu_to_flows(menu_json)
             flows_to_save = flows_to_save + menu_flows if flows_to_save else menu_flows
 
-        session.query(Flow).filter_by(chatbot_id=plubot_id).delete()
-        session.query(FlowEdge).filter_by(chatbot_id=plubot_id).delete()
+        # Obtener flujos existentes
+        existing_flows = session.query(Flow).filter_by(chatbot_id=plubot_id).order_by(Flow.position).all()
+        existing_flows_dict = {(f.user_message, f.position): f for f in existing_flows}
 
+        # Mapa para almacenar los IDs de los flujos
         flow_id_map = {}
+        new_flows = []
+
+        # Procesar flujos nuevos o actualizados
         for index, flow in enumerate(flows_to_save):
-            if flow.get('user_message') and flow.get('bot_response'):
-                intent = flow.get('intent', 'general')
-                condition = flow.get('condition', '')
+            if not flow.get('user_message') or not flow.get('bot_response'):
+                continue
+            user_message = flow['user_message']
+            key = (user_message, index)
+            intent = flow.get('intent', 'general')
+            condition = flow.get('condition', '')
+
+            if key in existing_flows_dict:
+                # Actualizar flujo existente
+                flow_entry = existing_flows_dict[key]
+                flow_entry.bot_response = flow['bot_response']
+                flow_entry.intent = intent
+                flow_entry.condition = condition
+            else:
+                # Crear nuevo flujo
                 flow_entry = Flow(
                     chatbot_id=plubot_id,
-                    user_message=flow['user_message'],
+                    user_message=user_message,
                     bot_response=flow['bot_response'],
                     position=index,
                     intent=intent,
                     condition=condition
                 )
                 session.add(flow_entry)
-                session.flush()
-                flow_id_map[str(index)] = flow_entry.id
+                new_flows.append(flow_entry)
 
+            session.flush()
+            flow_id_map[str(index)] = flow_entry.id
+
+        # Eliminar flujos que ya no están en flows_to_save
+        new_flow_keys = {(f['user_message'], index) for index, f in enumerate(flows_to_save) if f.get('user_message')}
+        for key, flow_entry in existing_flows_dict.items():
+            if key not in new_flow_keys:
+                session.delete(flow_entry)
+
+        # Eliminar aristas existentes
+        session.query(FlowEdge).filter_by(chatbot_id=plubot_id).delete()
+
+        # Crear nuevas aristas
         for edge in edges_raw:
             source_id = flow_id_map.get(edge.get('source'))
             target_id = flow_id_map.get(edge.get('target'))
@@ -588,7 +619,7 @@ def update_bot(plubot_id):
                     chatbot_id=plubot_id,
                     source_flow_id=source_id,
                     target_flow_id=target_id,
-                    condition=""
+                    condition=edge.get('sourceHandle', '')
                 )
                 session.add(edge_entry)
 
@@ -649,6 +680,9 @@ def get_bot(plubot_id):
 
         flows = session.query(Flow).filter_by(chatbot_id=plubot_id).order_by(Flow.position).all()
         edges = session.query(FlowEdge).filter_by(chatbot_id=plubot_id).all()
+        logger.info(f"[DEBUG] Edges recuperados para plubot_id {plubot_id}: {[(e.source_flow_id, e.target_flow_id) for e in edges]}")
+
+        flow_id_to_position = {flow.id: str(flow.position) for flow in flows}
 
         flows_data = [
             {
@@ -662,11 +696,12 @@ def get_bot(plubot_id):
 
         edges_data = [
             {
-                'source': str(edge.source_flow_id),
-                'target': str(edge.target_flow_id),
-                'condition': edge.condition
+                'source': flow_id_to_position.get(edge.source_flow_id, str(edge.source_flow_id)),
+                'target': flow_id_to_position.get(edge.target_flow_id, str(edge.target_flow_id)),
+                'sourceHandle': edge.condition if edge.condition else None
             } for edge in edges
         ]
+        logger.info(f"[DEBUG] Edges_data generados: {edges_data}")
 
         return jsonify({
             'status': 'success',
