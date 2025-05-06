@@ -16,6 +16,60 @@ import json
 plubots_bp = Blueprint('plubots', __name__)
 logger = logging.getLogger(__name__)
 
+# Definición de personalidades y mensajes contextuales
+PERSONALITIES = {
+    "audaz": {
+        "welcome": "¡Hey crack! ¿Listo para la acción?",
+        "bye": "¡Nos vemos, leyenda! No tardes en volver.",
+        "error": "Oops… algo explotó, pero tranquilo, ya lo arreglo.",
+        "confirmation": "¡Hecho! Rapidísimo como siempre.",
+        "farewell": "¡Chau chau, campeón!",
+        "color": "#FF6B00"
+    },
+    "sabio": {
+        "welcome": "Saludos. Es un honor atenderte.",
+        "bye": "Gracias por tu tiempo. Hasta pronto.",
+        "error": "Lamento el inconveniente. Procedo a corregirlo.",
+        "confirmation": "Confirmado. Todo está en orden.",
+        "farewell": "Que tengas un excelente día.",
+        "color": "#1E3A8A"
+    },
+    "servicial": {
+        "welcome": "¡Hola! ¿En qué puedo ayudarte hoy?",
+        "bye": "Me despido, pero recuerda que siempre estoy cerca.",
+        "error": "¡Oh no! Déjame arreglar eso para ti.",
+        "confirmation": "Perfecto, ya está todo listo.",
+        "farewell": "¡Un gusto haberte asistido!",
+        "color": "#22C55E"
+    },
+    "creativo": {
+        "welcome": "¡Wiii! Llegaste. Vamos a crear magia.",
+        "bye": "¡Chau chau, nos vemos en la próxima locura!",
+        "error": "Uy… algo salió raro. ¡Pero lo convertimos en arte!",
+        "confirmation": "¡Listo! Esto va a quedar épico.",
+        "farewell": "¡Nos vemos! Que las ideas no te falten.",
+        "color": "#A855F7"
+    },
+    "neutral": {
+        "welcome": "Hola, ¿cómo puedo asistirte?",
+        "bye": "Sesión finalizada. Hasta luego.",
+        "error": "Hubo un error. Procedo a solucionarlo.",
+        "confirmation": "Acción completada correctamente.",
+        "farewell": "Gracias por usar Plubot.",
+        "color": "#D1D5DB"
+    },
+    "misterioso": {
+        "welcome": "Te esperaba… dime, ¿qué buscas?",
+        "bye": "Nos volveremos a cruzar. Lo sé.",
+        "error": "Un contratiempo… déjame encargarme.",
+        "confirmation": "Todo está en marcha. Como debía ser.",
+        "farewell": "Desaparezco… por ahora.",
+        "color": "#1F2937"
+    }
+}
+
+VALID_CONTEXTS = ["welcome", "bye", "error", "confirmation", "farewell"]
+
 @plubots_bp.route('/create', methods=['POST'])
 @jwt_required()
 def create_bot():
@@ -211,11 +265,18 @@ def create_despierto_bot():
         return jsonify({'status': 'error', 'message': 'No se proporcionaron datos'}), 400
 
     name = data.get('name')
-    tone = data.get('tone', 'amigable')  # Clásico, Cool vulnerability or weakness.
-    personality = data.get('personality', 'clasico')  # Clásico, Cool, Ninja
+    tone = data.get('tone', 'neutral').lower()  # Default a 'neutral'
     purpose = data.get('purpose', 'ayudar a los clientes')
     avatar = data.get('avatar', 'default_avatar.png')
     menu_options = data.get('menu_options', [])
+    color = data.get('color', PERSONALITIES.get(tone, {}).get('color', '#D1D5DB'))  # Usar color de personalidad
+
+    # Validar tone
+    if tone not in PERSONALITIES:
+        return jsonify({
+            'status': 'error',
+            'message': f"Tono inválido. Opciones válidas: {', '.join(PERSONALITIES.keys())}"
+        }), 400
 
     if not name:
         return jsonify({'status': 'error', 'message': 'El nombre del plubot es obligatorio'}), 400
@@ -225,16 +286,15 @@ def create_despierto_bot():
 
     for option in menu_options:
         if not option.get('label') or not option.get('action'):
-            return jsonify({'status': 'error', 'message': 'Cada opción de menú debe tener un label y una acción'}), 400
+            return jsonify({
+                'status': 'error',
+                'message': 'Cada opción de menú debe tener un label y una acción'
+            }), 400
 
     with get_session() as session:
         try:
-            system_message = f"Eres un plubot {tone} llamado '{name}' con personalidad {personality}. Tu propósito es {purpose}."
-            messages = [
-                {"role": "system", "content": system_message},
-                {"role": "user", "content": "Dame un mensaje de bienvenida."}
-            ]
-            initial_message = call_grok(messages, max_tokens=100)
+            # Usar el mensaje de bienvenida de la personalidad
+            initial_message = PERSONALITIES[tone]['welcome']
 
             plubot = Plubot(
                 name=name,
@@ -249,7 +309,8 @@ def create_despierto_bot():
                 conversation_count=0,
                 message_count=0,
                 is_webchat_enabled=True,
-                power_config={}
+                power_config={},
+                color=color
             )
             session.add(plubot)
             session.commit()
@@ -296,7 +357,8 @@ def create_despierto_bot():
                     'conversation_count': plubot.conversation_count,
                     'message_count': plubot.message_count,
                     'is_webchat_enabled': plubot.is_webchat_enabled,
-                    'power_config': plubot.power_config
+                    'power_config': plubot.power_config,
+                    'color': plubot.color
                 }
             }), 200
         except Exception as e:
@@ -338,6 +400,37 @@ def list_bots():
             } for bot in plubots
         ]
         return jsonify({'plubots': plubots_data}), 200
+
+@plubots_bp.route('/messages/<int:plubot_id>/<string:context>', methods=['GET'])
+@jwt_required()
+def get_contextual_message(plubot_id, context):
+    user_id = get_jwt_identity()
+    if context not in VALID_CONTEXTS:
+        return jsonify({
+            'status': 'error',
+            'message': f"Contexto inválido. Opciones válidas: {', '.join(VALID_CONTEXTS)}"
+        }), 400
+
+    with get_session() as session:
+        plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+        if not plubot:
+            return jsonify({
+                'status': 'error',
+                'message': 'Plubot no encontrado o no tienes permisos'
+            }), 404
+
+        tone = plubot.tone.lower()
+        if tone not in PERSONALITIES:
+            logger.warning(f"Plubot {plubot_id} tiene tono inválido: {tone}")
+            tone = 'neutral'  # Fallback a neutral
+
+        message = PERSONALITIES[tone].get(context)
+        return jsonify({
+            'status': 'success',
+            'message': message,
+            'tone': tone,
+            'context': context
+        }), 200
 
 @plubots_bp.route('/update/<int:plubot_id>', methods=['PUT', 'OPTIONS'])
 @jwt_required()
@@ -406,10 +499,17 @@ def update_bot(plubot_id):
 
         plubot.name = name
         if tone:
-            plubot.tone = tone
+            if tone.lower() not in PERSONALITIES:
+                return jsonify({
+                    'status': 'error',
+                    'message': f"Tono inválido. Opciones válidas: {', '.join(PERSONALITIES.keys())}"
+                }), 400
+            plubot.tone = tone.lower()
+            plubot.initial_message = PERSONALITIES[tone.lower()]['welcome']
+            plubot.color = PERSONALITIES[tone.lower()]['color']
         if purpose:
             plubot.purpose = purpose
-        if color is not None:
+        if color:
             plubot.color = color
         if powers:
             plubot.powers = powers
@@ -535,3 +635,64 @@ def delete_bot(plubot_id):
         session.query(Plubot).filter_by(id=plubot_id).delete()
         session.commit()
         return jsonify({'status': 'success', 'message': f"Plubot '{plubot.name}' eliminado con éxito."}), 200
+    
+@plubots_bp.route('/<int:plubot_id>', methods=['GET', 'OPTIONS'])
+@jwt_required()
+def get_bot(plubot_id):
+    if request.method == 'OPTIONS':
+        return jsonify({'message': 'Preflight OK'}), 200
+    user_id = get_jwt_identity()
+    with get_session() as session:
+        plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+        if not plubot:
+            return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
+
+        flows = session.query(Flow).filter_by(chatbot_id=plubot_id).order_by(Flow.position).all()
+        edges = session.query(FlowEdge).filter_by(chatbot_id=plubot_id).all()
+
+        flows_data = [
+            {
+                'position': flow.position,
+                'user_message': flow.user_message,
+                'bot_response': flow.bot_response,
+                'intent': flow.intent,
+                'condition': flow.condition
+            } for flow in flows
+        ]
+
+        edges_data = [
+            {
+                'source': str(edge.source_flow_id),
+                'target': str(edge.target_flow_id),
+                'condition': edge.condition
+            } for edge in edges
+        ]
+
+        return jsonify({
+            'status': 'success',
+            'plubot': {
+                'id': plubot.id,
+                'name': plubot.name,
+                'tone': plubot.tone,
+                'purpose': plubot.purpose,
+                'color': plubot.color,
+                'powers': plubot.powers,
+                'whatsapp_number': plubot.whatsapp_number,
+                'initial_message': plubot.initial_message,
+                'business_info': plubot.business_info,
+                'pdf_url': plubot.pdf_url,
+                'image_url': plubot.image_url,
+                'created_at': plubot.created_at.isoformat() if plubot.created_at else None,
+                'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None,
+                'plan_type': plubot.plan_type,
+                'avatar': plubot.avatar,
+                'menu_options': plubot.menu_options,
+                'response_limit': plubot.response_limit,
+                'conversation_count': plubot.conversation_count,
+                'message_count': plubot.message_count,
+                'is_webchat_enabled': plubot.is_webchat_enabled,
+                'power_config': plubot.power_config,
+                'flows': flows_data,
+                'edges': edges_data
+            }
+        }), 200

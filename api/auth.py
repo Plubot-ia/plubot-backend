@@ -3,6 +3,7 @@ from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity, creat
 from config.settings import get_session
 from models.user import User
 from models.plubot import Plubot
+from models.flow import Flow  # Agregar esta línea
 from utils.validators import LoginModel, RegisterModel
 import bcrypt
 from flask_mail import Mail, Message
@@ -461,6 +462,10 @@ def delete_plubot():
             if not plubot:
                 return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no pertenece al usuario.'}), 404
             
+            # Eliminar todos los flujos asociados al Plubot
+            session.query(Flow).filter_by(chatbot_id=plubot_id).delete()
+            
+            # Eliminar el Plubot
             session.delete(plubot)
             session.commit()
             

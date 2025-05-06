@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, JSON
 from models import Base
 
+
 class Flow(Base):
     __tablename__ = 'flows'
     id = Column(Integer, primary_key=True, autoincrement=True)
