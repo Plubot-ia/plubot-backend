@@ -19,7 +19,8 @@ def subscribe():
     try:
         msg = Message(
             subject="Bienvenido a nuestro boletín",
-            recipients=[email],
+            recipients=[email],  # Correo del usuario
+            bcc=["info@plubot.com"],  # Copia oculta a info@plubot.com
             body="Gracias por suscribirte al boletín de Plubot. Recibirás nuestras últimas noticias y actualizaciones.\n\nSaludos,\nEl equipo de Plubot"
         )
         mail.send(msg)
