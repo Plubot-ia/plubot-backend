@@ -21,10 +21,13 @@ class WhatsAppNumberModel(BaseModel):
         return value
 
 class FlowModel(BaseModel):
+    position: int = Field(..., ge=0)  # Nuevo: posición del flujo (entero no negativo)
     user_message: str = Field(..., min_length=1)
     bot_response: str = Field(..., min_length=1)
     intent: str = Field(default="general", min_length=1)
     condition: str = Field(default="", min_length=0)
+    position_x: Optional[float] = None  # Nuevo: coordenada X, opcional
+    position_y: Optional[float] = None  # Nuevo: coordenada Y, opcional
 
 class MenuItemModel(BaseModel):
     precio: float = Field(..., gt=0)

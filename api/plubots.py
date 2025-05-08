@@ -92,7 +92,6 @@ def create_bot():
     template_id = data.get('template_id')
     menu_json = data.get('menu_json')
     power_config = data.get('powerConfig', {})
-    # Nuevos campos
     plan_type = data.get('plan_type', 'free')
     avatar = data.get('avatar')
     menu_options = data.get('menu_options', [])
@@ -199,13 +198,17 @@ def create_bot():
                 if flow.get('user_message') and flow.get('bot_response'):
                     intent = flow.get('intent', 'general')
                     condition = flow.get('condition', '')
+                    position_x = flow.get('position_x')  # Nuevo: obtener position_x
+                    position_y = flow.get('position_y')  # Nuevo: obtener position_y
                     flow_entry = Flow(
                         chatbot_id=plubot_id,
                         user_message=flow['user_message'],
                         bot_response=flow['bot_response'],
                         position=index,
                         intent=intent,
-                        condition=condition
+                        condition=condition,
+                        position_x=position_x,  # Nuevo: asignar position_x
+                        position_y=position_y   # Nuevo: asignar position_y
                     )
                     session.add(flow_entry)
                     session.flush()
@@ -265,13 +268,12 @@ def create_despierto_bot():
         return jsonify({'status': 'error', 'message': 'No se proporcionaron datos'}), 400
 
     name = data.get('name')
-    tone = data.get('tone', 'neutral').lower()  # Default a 'neutral'
+    tone = data.get('tone', 'neutral').lower()
     purpose = data.get('purpose', 'ayudar a los clientes')
     avatar = data.get('avatar', 'default_avatar.png')
     menu_options = data.get('menu_options', [])
-    color = data.get('color', PERSONALITIES.get(tone, {}).get('color', '#D1D5DB'))  # Usar color de personalidad
+    color = data.get('color', PERSONALITIES.get(tone, {}).get('color', '#D1D5DB'))
 
-    # Validar tone
     if tone not in PERSONALITIES:
         return jsonify({
             'status': 'error',
@@ -293,9 +295,7 @@ def create_despierto_bot():
 
     with get_session() as session:
         try:
-            # Usar el mensaje de bienvenida de la personalidad
             initial_message = PERSONALITIES[tone]['welcome']
-
             plubot = Plubot(
                 name=name,
                 tone=tone,
@@ -323,7 +323,9 @@ def create_despierto_bot():
                     'bot_response': f"Has seleccionado {option['label']}. ¿Cómo puedo ayudarte con esto?",
                     'position': index,
                     'intent': 'menu_option',
-                    'condition': ''
+                    'condition': '',
+                    'position_x': 100.0 * index,  # Nuevo: posición predeterminada
+                    'position_y': 100.0           # Nuevo: posición predeterminada
                 })
 
             flow_id_map = {}
@@ -332,9 +334,11 @@ def create_despierto_bot():
                     chatbot_id=plubot_id,
                     user_message=flow['user_message'],
                     bot_response=flow['bot_response'],
-                    position=index,
+                    position=flow['position'],
                     intent=flow['intent'],
-                    condition=flow['condition']
+                    condition=flow['condition'],
+                    position_x=flow['position_x'],  # Nuevo: asignar position_x
+                    position_y=flow['position_y']   # Nuevo: asignar position_y
                 )
                 session.add(flow_entry)
                 session.flush()
@@ -422,8 +426,7 @@ def get_contextual_message(plubot_id, context):
         tone = plubot.tone.lower()
         if tone not in PERSONALITIES:
             logger.warning(f"Plubot {plubot_id} tiene tono inválido: {tone}")
-            tone = 'neutral'  # Fallback a neutral
-
+            tone = 'neutral'
         message = PERSONALITIES[tone].get(context)
         return jsonify({
             'status': 'success',
@@ -464,6 +467,7 @@ def update_bot(plubot_id):
     conversation_count = data.get('conversation_count')
     message_count = data.get('message_count')
     is_webchat_enabled = data.get('is_webchat_enabled')
+    initial_message = data.get('initial_message')
 
     if not name:
         return jsonify({'status': 'error', 'message': 'El nombre del plubot es obligatorio'}), 400
@@ -494,179 +498,192 @@ def update_bot(plubot_id):
             return jsonify({'status': 'error', 'message': f'Flujo inválido en posición {index}: {str(e)}'}), 400
 
     with get_session() as session:
-        plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
-        if not plubot:
-            return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
+        try:
+            plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+            if not plubot:
+                return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
 
-        # Actualizar atributos del plubot
-        plubot.name = name
-        if tone:
-            if tone.lower() not in PERSONALITIES:
-                return jsonify({
-                    'status': 'error',
-                    'message': f"Tono inválido. Opciones válidas: {', '.join(PERSONALITIES.keys())}"
-                }), 400
-            plubot.tone = tone.lower()
-            plubot.initial_message = PERSONALITIES[tone.lower()]['welcome']
-            plubot.color = PERSONALITIES[tone.lower()]['color']
-        if purpose:
-            plubot.purpose = purpose
-        if color:
-            plubot.color = color
-        if powers:
-            plubot.powers = powers
-        if whatsapp_number:
-            plubot.whatsapp_number = whatsapp_number
-        if business_info is not None:
-            plubot.business_info = business_info
-        if pdf_url is not None:
-            plubot.pdf_url = pdf_url
-            process_pdf_async.delay(plubot_id, pdf_url)
-        if image_url is not None:
-            plubot.image_url = image_url
-        if power_config:
-            plubot.power_config = power_config
-        if plan_type:
-            plubot.plan_type = plan_type
-        if avatar is not None:
-            plubot.avatar = avatar
-        if menu_options is not None:
-            plubot.menu_options = menu_options
-        if response_limit is not None:
-            plubot.response_limit = response_limit
-        if conversation_count is not None:
-            plubot.conversation_count = conversation_count
-        if message_count is not None:
-            plubot.message_count = message_count
-        if is_webchat_enabled is not None:
-            plubot.is_webchat_enabled = is_webchat_enabled
+            plubot.name = name
+            if tone:
+                if tone.lower() not in PERSONALITIES:
+                    return jsonify({
+                        'status': 'error',
+                        'message': f"Tono inválido. Opciones válidas: {', '.join(PERSONALITIES.keys())}"
+                    }), 400
+                plubot.tone = tone.lower()
+                if not initial_message:
+                    plubot.initial_message = PERSONALITIES[tone.lower()]['welcome']
+                plubot.color = PERSONALITIES[tone.lower()]['color']
+            if purpose:
+                plubot.purpose = purpose
+            if color:
+                plubot.color = color
+            if powers:
+                plubot.powers = powers
+            if whatsapp_number:
+                plubot.whatsapp_number = whatsapp_number
+            if business_info is not None:
+                plubot.business_info = business_info
+            if pdf_url is not None:
+                plubot.pdf_url = pdf_url
+                process_pdf_async.delay(plubot_id, pdf_url)
+            if image_url is not None:
+                plubot.image_url = image_url
+            if power_config:
+                plubot.power_config = power_config
+            if plan_type:
+                plubot.plan_type = plan_type
+            if avatar is not None:
+                plubot.avatar = avatar
+            if menu_options is not None:
+                plubot.menu_options = menu_options
+            if response_limit is not None:
+                plubot.response_limit = response_limit
+            if conversation_count is not None:
+                plubot.conversation_count = conversation_count
+            if message_count is not None:
+                plubot.message_count = message_count
+            if is_webchat_enabled is not None:
+                plubot.is_webchat_enabled = is_webchat_enabled
+            if initial_message:
+                plubot.initial_message = initial_message
 
-        if power_config.get('google-sheets', {}).get('credentials'):
-            user = session.query(User).filter_by(id=user_id).first()
-            if user:
-                user.google_sheets_credentials = power_config['google-sheets']['credentials']
-            else:
-                logger.error(f"Usuario con ID {user_id} no encontrado")
-                return jsonify({'status': 'error', 'message': 'Usuario no encontrado'}), 404
+            if power_config.get('google-sheets', {}).get('credentials'):
+                user = session.query(User).filter_by(id=user_id).first()
+                if user:
+                    user.google_sheets_credentials = power_config['google-sheets']['credentials']
+                else:
+                    logger.error(f"Usuario con ID {user_id} no encontrado")
+                    return jsonify({'status': 'error', 'message': 'Usuario no encontrado'}), 404
 
-        flows_to_save = flows
-        if template_id:
-            template = session.query(Template).filter_by(id=template_id).first()
-            if template:
-                plubot.tone = template.tone
-                plubot.purpose = template.purpose
-                template_flows = json.loads(template.flows)
-                flows_to_save = template_flows + flows if flows else template_flows
+            flows_to_save = flows
+            if template_id:
+                template = session.query(Template).filter_by(id=template_id).first()
+                if template:
+                    plubot.tone = template.tone
+                    plubot.purpose = template.purpose
+                    template_flows = json.loads(template.flows)
+                    flows_to_save = template_flows + flows if flows else template_flows
 
-        if menu_json:
-            menu_flows = parse_menu_to_flows(menu_json)
-            flows_to_save = flows_to_save + menu_flows if flows_to_save else menu_flows
+            if menu_json:
+                menu_flows = parse_menu_to_flows(menu_json)
+                flows_to_save = flows_to_save + menu_flows if flows_to_save else menu_flows
 
-        # Obtener flujos existentes
-        existing_flows = session.query(Flow).filter_by(chatbot_id=plubot_id).order_by(Flow.position).all()
-        existing_flows_dict = {(f.user_message, f.position): f for f in existing_flows}
+            existing_flows = session.query(Flow).filter_by(chatbot_id=plubot_id).order_by(Flow.position).all()
+            existing_flow_ids = [flow.id for flow in existing_flows]
 
-        # Mapa para almacenar los IDs de los flujos
-        flow_id_map = {}
-        new_flows = []
+            if existing_flow_ids:
+                session.query(FlowEdge).filter(
+                    (FlowEdge.source_flow_id.in_(existing_flow_ids)) | (FlowEdge.target_flow_id.in_(existing_flow_ids))
+                ).delete(synchronize_session=False)
 
-        # Procesar flujos nuevos o actualizados
-        for index, flow in enumerate(flows_to_save):
-            if not flow.get('user_message') or not flow.get('bot_response'):
-                continue
-            user_message = flow['user_message']
-            key = (user_message, index)
-            intent = flow.get('intent', 'general')
-            condition = flow.get('condition', '')
+            session.query(Flow).filter_by(chatbot_id=plubot_id).delete(synchronize_session=False)
 
-            if key in existing_flows_dict:
-                # Actualizar flujo existente
-                flow_entry = existing_flows_dict[key]
-                flow_entry.bot_response = flow['bot_response']
-                flow_entry.intent = intent
-                flow_entry.condition = condition
-            else:
-                # Crear nuevo flujo
+            flow_id_map = {}
+            new_flows = []
+            for index, flow in enumerate(flows_to_save):
+                if not flow.get('user_message') or not flow.get('bot_response'):
+                    continue
+                user_message = flow['user_message']
+                intent = flow.get('intent', 'general')
+                condition = flow.get('condition', '')
+                position_x = flow.get('position_x')  # Nuevo: obtener position_x
+                position_y = flow.get('position_y')  # Nuevo: obtener position_y
                 flow_entry = Flow(
                     chatbot_id=plubot_id,
                     user_message=user_message,
                     bot_response=flow['bot_response'],
                     position=index,
                     intent=intent,
-                    condition=condition
+                    condition=condition,
+                    position_x=position_x,  # Nuevo: asignar position_x
+                    position_y=position_y   # Nuevo: asignar position_y
                 )
                 session.add(flow_entry)
                 new_flows.append(flow_entry)
+                session.flush()
+                flow_id_map[str(index)] = flow_entry.id
 
-            session.flush()
-            flow_id_map[str(index)] = flow_entry.id
+            for edge in edges_raw:
+                source_id = flow_id_map.get(edge.get('source'))
+                target_id = flow_id_map.get(edge.get('target'))
+                if source_id and target_id:
+                    edge_entry = FlowEdge(
+                        chatbot_id=plubot_id,
+                        source_flow_id=source_id,
+                        target_flow_id=target_id,
+                        condition=edge.get('sourceHandle', '')
+                    )
+                    session.add(edge_entry)
 
-        # Eliminar flujos que ya no están en flows_to_save
-        new_flow_keys = {(f['user_message'], index) for index, f in enumerate(flows_to_save) if f.get('user_message')}
-        for key, flow_entry in existing_flows_dict.items():
-            if key not in new_flow_keys:
-                session.delete(flow_entry)
-
-        # Eliminar aristas existentes
-        session.query(FlowEdge).filter_by(chatbot_id=plubot_id).delete()
-
-        # Crear nuevas aristas
-        for edge in edges_raw:
-            source_id = flow_id_map.get(edge.get('source'))
-            target_id = flow_id_map.get(edge.get('target'))
-            if source_id and target_id:
-                edge_entry = FlowEdge(
-                    chatbot_id=plubot_id,
-                    source_flow_id=source_id,
-                    target_flow_id=target_id,
-                    condition=edge.get('sourceHandle', '')
-                )
-                session.add(edge_entry)
-
-        session.commit()
-        return jsonify({
-            'status': 'success',
-            'message': f"Plubot '{name}' actualizado con éxito.",
-            'plubot': {
-                'id': plubot.id,
-                'name': plubot.name,
-                'tone': plubot.tone,
-                'purpose': plubot.purpose,
-                'color': plubot.color,
-                'powers': plubot.powers,
-                'whatsapp_number': plubot.whatsapp_number,
-                'initial_message': plubot.initial_message,
-                'business_info': plubot.business_info,
-                'pdf_url': plubot.pdf_url,
-                'image_url': plubot.image_url,
-                'created_at': plubot.created_at.isoformat() if plubot.created_at else None,
-                'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None,
-                'plan_type': plubot.plan_type,
-                'avatar': plubot.avatar,
-                'menu_options': plubot.menu_options,
-                'response_limit': plubot.response_limit,
-                'conversation_count': plubot.conversation_count,
-                'message_count': plubot.message_count,
-                'is_webchat_enabled': plubot.is_webchat_enabled,
-                'power_config': plubot.power_config
-            }
-        }), 200
+            session.commit()
+            return jsonify({
+                'status': 'success',
+                'message': f"Plubot '{name}' actualizado con éxito.",
+                'plubot': {
+                    'id': plubot.id,
+                    'name': plubot.name,
+                    'tone': plubot.tone,
+                    'purpose': plubot.purpose,
+                    'color': plubot.color,
+                    'powers': plubot.powers,
+                    'whatsapp_number': plubot.whatsapp_number,
+                    'initial_message': plubot.initial_message,
+                    'business_info': plubot.business_info,
+                    'pdf_url': plubot.pdf_url,
+                    'image_url': plubot.image_url,
+                    'created_at': plubot.created_at.isoformat() if plubot.created_at else None,
+                    'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None,
+                    'plan_type': plubot.plan_type,
+                    'avatar': plubot.avatar,
+                    'menu_options': plubot.menu_options,
+                    'response_limit': plubot.response_limit,
+                    'conversation_count': plubot.conversation_count,
+                    'message_count': plubot.message_count,
+                    'is_webchat_enabled': plubot.is_webchat_enabled,
+                    'power_config': plubot.power_config
+                }
+            }), 200
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error al actualizar el Plubot {plubot_id}: {str(e)}")
+            if "ForeignKeyViolation" in str(e):
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No se puede actualizar el Plubot porque tiene flujos con conexiones activas. Por favor, elimina las conexiones primero o contacta al soporte.'
+                }), 400
+            return jsonify({'status': 'error', 'message': f'Error al actualizar el Plubot: {str(e)}'}), 500
 
 @plubots_bp.route('/delete/<int:plubot_id>', methods=['DELETE'])
 @jwt_required()
 def delete_bot(plubot_id):
     user_id = get_jwt_identity()
     with get_session() as session:
-        plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
-        if not plubot:
-            return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
+        try:
+            plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+            if not plubot:
+                return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
 
-        session.query(Flow).filter_by(chatbot_id=plubot_id).delete()
-        session.query(FlowEdge).filter_by(chatbot_id=plubot_id).delete()
-        session.query(Plubot).filter_by(id=plubot_id).delete()
-        session.commit()
-        return jsonify({'status': 'success', 'message': f"Plubot '{plubot.name}' eliminado con éxito."}), 200
-    
+            existing_flows = session.query(Flow).filter_by(chatbot_id=plubot_id).all()
+            existing_flow_ids = [flow.id for flow in existing_flows]
+            if existing_flow_ids:
+                session.query(FlowEdge).filter(
+                    (FlowEdge.source_flow_id.in_(existing_flow_ids)) | (FlowEdge.target_flow_id.in_(existing_flow_ids))
+                ).delete(synchronize_session=False)
+            session.query(Flow).filter_by(chatbot_id=plubot_id).delete(synchronize_session=False)
+            session.query(Plubot).filter_by(id=plubot_id).delete(synchronize_session=False)
+            session.commit()
+            return jsonify({'status': 'success', 'message': f"Plubot '{plubot.name}' eliminado con éxito."}), 200
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Error al eliminar el Plubot {plubot_id}: {str(e)}")
+            if "ForeignKeyViolation" in str(e):
+                return jsonify({
+                    'status': 'error',
+                    'message': 'No se puede eliminar el Plubot porque tiene flujos con conexiones activas. Por favor, elimina las conexiones primero o contacta al soporte.'
+                }), 400
+            return jsonify({'status': 'error', 'message': f'Error al eliminar el Plubot: {str(e)}'}), 500
+
 @plubots_bp.route('/<int:plubot_id>', methods=['GET', 'OPTIONS'])
 @jwt_required()
 def get_bot(plubot_id):
@@ -683,17 +700,17 @@ def get_bot(plubot_id):
         logger.info(f"[DEBUG] Edges recuperados para plubot_id {plubot_id}: {[(e.source_flow_id, e.target_flow_id) for e in edges]}")
 
         flow_id_to_position = {flow.id: str(flow.position) for flow in flows}
-
         flows_data = [
             {
                 'position': flow.position,
                 'user_message': flow.user_message,
                 'bot_response': flow.bot_response,
                 'intent': flow.intent,
-                'condition': flow.condition
+                'condition': flow.condition,
+                'position_x': flow.position_x,  # Nuevo: incluir position_x
+                'position_y': flow.position_y   # Nuevo: incluir position_y
             } for flow in flows
         ]
-
         edges_data = [
             {
                 'source': flow_id_to_position.get(edge.source_flow_id, str(edge.source_flow_id)),
