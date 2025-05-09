@@ -572,12 +572,12 @@ def update_bot(plubot_id):
             existing_flows = session.query(Flow).filter_by(chatbot_id=plubot_id).order_by(Flow.position).all()
             existing_flow_ids = [flow.id for flow in existing_flows]
 
+            # Eliminar primero las aristas (FlowEdge) y luego los flujos (Flow)
             if existing_flow_ids:
                 session.query(FlowEdge).filter(
                     (FlowEdge.source_flow_id.in_(existing_flow_ids)) | (FlowEdge.target_flow_id.in_(existing_flow_ids))
                 ).delete(synchronize_session=False)
-
-            session.query(Flow).filter_by(chatbot_id=plubot_id).delete(synchronize_session=False)
+                session.query(Flow).filter_by(chatbot_id=plubot_id).delete(synchronize_session=False)
 
             flow_id_map = {}
             new_flows = []
