@@ -587,8 +587,11 @@ def update_bot(plubot_id):
                 user_message = flow['user_message']
                 intent = flow.get('intent', 'general')
                 condition = flow.get('condition', '')
-                position_x = flow.get('position_x')  # Nuevo: obtener position_x
-                position_y = flow.get('position_y')  # Nuevo: obtener position_y
+                position_x = flow.get('position_x')
+                position_y = flow.get('position_y')
+                # Asegurarse de que position_x y position_y sean números, usando 0.0 como valor por defecto
+                position_x = float(position_x) if position_x is not None else 0.0
+                position_y = float(position_y) if position_y is not None else 0.0
                 flow_entry = Flow(
                     chatbot_id=plubot_id,
                     user_message=user_message,
@@ -596,8 +599,8 @@ def update_bot(plubot_id):
                     position=index,
                     intent=intent,
                     condition=condition,
-                    position_x=position_x,  # Nuevo: asignar position_x
-                    position_y=position_y   # Nuevo: asignar position_y
+                    position_x=position_x,  # Usar valor validado
+                    position_y=position_y   # Usar valor validado
                 )
                 session.add(flow_entry)
                 new_flows.append(flow_entry)
