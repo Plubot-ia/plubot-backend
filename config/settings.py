@@ -34,7 +34,7 @@ def load_config(app):
     # Configuraciones de JWT
     app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'super-secret')
     app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
-    app.config['JWT_TOKEN_LOCATION'] = ['cookies', 'headers']  # Cambiado
+    app.config['JWT_TOKEN_LOCATION'] = ['cookies', 'headers']
     app.config['JWT_ACCESS_COOKIE_NAME'] = 'access_token'
     app.config['JWT_COOKIE_CSRF_PROTECT'] = False
     app.config['JWT_COOKIE_SECURE'] = os.getenv('FLASK_ENV', 'development') != 'development'
@@ -64,6 +64,11 @@ def load_config(app):
     app.config['ENCRYPTION_KEY'] = os.getenv('ENCRYPTION_KEY')
     if not app.config['ENCRYPTION_KEY']:
         raise ValueError("No se encontró ENCRYPTION_KEY en las variables de entorno.")
+
+    # Configuración para el endpoint de opiniones
+    app.config['OPINION_RECIPIENT_EMAIL'] = os.getenv('OPINION_RECIPIENT_EMAIL')
+    if not app.config['OPINION_RECIPIENT_EMAIL']:
+        raise ValueError("No se encontró OPINION_RECIPIENT_EMAIL en las variables de entorno.")
 
 # Configuración de SQLAlchemy
 database_url = os.getenv('DATABASE_URL', '').replace('postgres://', 'postgresql://')

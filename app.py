@@ -14,6 +14,8 @@ from utils.templates import load_initial_templates
 from api import api_bp
 from models import db
 from api.grok import grok_bp
+from api.integrations import integrations_bp
+from api.opinion import opinion_bp  # Nueva importación
 
 # Configuración de logging
 setup_logging()
@@ -35,7 +37,7 @@ CORS(app, resources={r"/*": {
         "http://localhost:5173",
         "http://192.168.0.213:5173",
         "https://www.plubot.com",
-        "https://plubot.com",  # Añadido para producción
+        "https://plubot.com",
         "https://plubot-frontend.vercel.app",
         "https://staging.plubot.com"
     ],
@@ -62,8 +64,8 @@ def handle_auth_error(e):
 # Registro de blueprints
 app.register_blueprint(api_bp, url_prefix='/api')
 app.register_blueprint(grok_bp, url_prefix='/api')
-from api.integrations import integrations_bp
 app.register_blueprint(integrations_bp, url_prefix='/api/integrations')
+app.register_blueprint(opinion_bp, url_prefix='/api')  # Nuevo registro
 
 @app.route('/create', methods=['GET', 'POST'])
 def create():
