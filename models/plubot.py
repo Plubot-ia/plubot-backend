@@ -35,6 +35,13 @@ class Plubot(Base):
     message_count = Column(Integer, nullable=True, default=0)  # Estadísticas básicas
     is_webchat_enabled = Column(Boolean, nullable=True, default=True)  # Solo chat web
     power_config = Column(JSON, nullable=True, default=dict)  # Configuración de poderes
+    
+    # Nuevos campos para embebido
+    public_id = Column(String, unique=True, nullable=True)  # ID público para acceso al chatbot embebido
+    embed_config = Column(JSON, nullable=True, default=dict)  # Configuración de embebido (tema, posición, etc.)
+    is_embeddable = Column(Boolean, nullable=True, default=True)  # Si se permite embeber el chatbot
+    embed_domains = Column(JSON, nullable=True, default=list)  # Dominios permitidos para embeber
+    qr_code_url = Column(String, nullable=True)  # URL del código QR generado
 
     def __repr__(self):
         return f'<Plubot {self.name}>'

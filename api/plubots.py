@@ -592,6 +592,10 @@ def update_bot(plubot_id):
                 # Asegurarse de que position_x y position_y sean números, usando 0.0 como valor por defecto
                 position_x = float(position_x) if position_x is not None else 0.0
                 position_y = float(position_y) if position_y is not None else 0.0
+                
+                # Crear un ID para el nodo compatible con ReactFlow
+                node_id = f"node-{index}"
+                
                 flow_entry = Flow(
                     chatbot_id=plubot_id,
                     user_message=user_message,
@@ -606,16 +610,33 @@ def update_bot(plubot_id):
                 new_flows.append(flow_entry)
                 session.flush()
                 flow_id_map[str(index)] = flow_entry.id
+                # También mapear el ID del nodo de ReactFlow al ID de la base de datos
+                flow_id_map[node_id] = flow_entry.id
 
-            for edge in edges_raw:
-                source_id = flow_id_map.get(edge.get('source'))
-                target_id = flow_id_map.get(edge.get('target'))
+            # Procesar los bordes asegurando que tengan sourceHandle válido
+            for i, edge in enumerate(edges_raw):
+                # Extraer source y target, que pueden ser IDs de nodo o posiciones
+                source = edge.get('source')
+                target = edge.get('target')
+                
+                # Obtener los IDs de flujo correspondientes
+                source_id = flow_id_map.get(source)
+                target_id = flow_id_map.get(target)
+                
+                # Asegurarse de que sourceHandle nunca sea null
+                source_handle = edge.get('sourceHandle')
+                if source_handle is None or source_handle == 'null':
+                    source_handle = 'default'
+                
                 if source_id and target_id:
+                    # Crear un ID único para el borde
+                    edge_id = f"edge-{i}-{source}-{target}"
+                    
                     edge_entry = FlowEdge(
                         chatbot_id=plubot_id,
                         source_flow_id=source_id,
                         target_flow_id=target_id,
-                        condition=edge.get('sourceHandle', '')
+                        condition=source_handle
                     )
                     session.add(edge_entry)
 
@@ -637,25 +658,12 @@ def update_bot(plubot_id):
                     'image_url': plubot.image_url,
                     'created_at': plubot.created_at.isoformat() if plubot.created_at else None,
                     'updated_at': plubot.updated_at.isoformat() if plubot.updated_at else None,
-                    'plan_type': plubot.plan_type,
-                    'avatar': plubot.avatar,
-                    'menu_options': plubot.menu_options,
-                    'response_limit': plubot.response_limit,
-                    'conversation_count': plubot.conversation_count,
-                    'message_count': plubot.message_count,
-                    'is_webchat_enabled': plubot.is_webchat_enabled,
-                    'power_config': plubot.power_config
                 }
             }), 200
         except Exception as e:
             session.rollback()
-            logger.error(f"Error al actualizar el Plubot {plubot_id}: {str(e)}")
-            if "ForeignKeyViolation" in str(e):
-                return jsonify({
-                    'status': 'error',
-                    'message': 'No se puede actualizar el Plubot porque tiene flujos con conexiones activas. Por favor, elimina las conexiones primero o contacta al soporte.'
-                }), 400
-            return jsonify({'status': 'error', 'message': f'Error al actualizar el Plubot: {str(e)}'}), 500
+            logger.error(f"Error al actualizar el plubot: {str(e)}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @plubots_bp.route('/delete/<int:plubot_id>', methods=['DELETE'])
 @jwt_required()
@@ -751,3 +759,383 @@ def get_bot(plubot_id):
                 'edges': edges_data
             }
         }), 200
+
+@plubots_bp.route('/<int:plubot_id>/embed', methods=['POST'])
+@jwt_required()
+def generate_embed_resources(plubot_id):
+    try:
+        user_id = get_jwt_identity()
+        
+        # Usar get_session como context manager con with
+        with get_session() as session:
+            # Verificar que el plubot existe y pertenece al usuario
+            plubot = session.query(Plubot).filter(Plubot.id == plubot_id, Plubot.user_id == user_id).first()
+            if not plubot:
+                return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permiso para acceder a él'}), 404
+            
+            # Obtener los datos de personalización del request
+            data = request.get_json()
+            customization = data.get('customization', {})
+            
+            # En una implementación real, aquí se generaría un ID público único
+            # Para esta implementación, usamos el ID del plubot como ID público
+            public_id = str(plubot_id)
+            
+            # Generar URL para el código QR
+            qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={request.host_url}chat/{public_id}"
+            
+            # Actualizar el estado de webchat_enabled si no está habilitado
+            if not plubot.is_webchat_enabled:
+                plubot.is_webchat_enabled = True
+                session.commit()
+        
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'publicId': public_id,
+                'qrCodeUrl': qr_code_url,
+                'customization': customization
+            }
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error generando recursos de embebido: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# Endpoint público para cargar información del chatbot (sin autenticación JWT)
+@plubots_bp.route('/chat/<string:public_id>', methods=['GET'])
+def get_public_bot(public_id):
+    try:
+        # Convertir public_id a int para buscar el plubot
+        # En una implementación real, habría una tabla que mapee IDs públicos a IDs de plubot
+        try:
+            plubot_id = int(public_id)
+        except ValueError:
+            return jsonify({'status': 'error', 'message': 'ID de chatbot inválido'}), 400
+        
+        # Variables para almacenar datos que se usarán fuera del bloque with
+        plubot_data = None
+        flows_data = []
+        edges_data = []
+        welcome_message = None
+        personality = None
+        
+        # Usar get_session como context manager con with
+        with get_session() as session:
+            plubot = session.query(Plubot).filter(Plubot.id == plubot_id).first()
+            if not plubot:
+                return jsonify({'status': 'error', 'message': 'Chatbot no encontrado'}), 404
+            
+            logger.info(f"Plubot encontrado: {plubot.name} (ID: {plubot.id})")
+            
+            # Verificar si el webchat está habilitado
+            if not plubot.is_webchat_enabled:
+                return jsonify({'status': 'error', 'message': 'Este chatbot no está disponible para chat público'}), 403
+            
+            # Obtener el mensaje de bienvenida según la personalidad
+            personality = plubot.tone or "servicial"
+            welcome_message = PERSONALITIES.get(personality, PERSONALITIES["servicial"])["welcome"]
+            
+            # Guardar datos del plubot que necesitaremos fuera del bloque with
+            plubot_data = {
+                'id': plubot.id,
+                'name': plubot.name,
+                'color': plubot.color or PERSONALITIES.get(personality, PERSONALITIES["servicial"])["color"],
+            }
+            
+            # Obtener flujos y bordes - Corregido para usar chatbot_id
+            flows = session.query(Flow).filter(Flow.chatbot_id == plubot.id).order_by(Flow.position).all()
+            edges = session.query(FlowEdge).filter(FlowEdge.chatbot_id == plubot.id).all()
+            
+            logger.info(f"Flujos encontrados: {len(flows)}, Bordes encontrados: {len(edges)}")
+            
+            # Crear mapeo de ID de flujo a posición
+            flow_id_to_position = {flow.id: str(flow.position) for flow in flows}
+            
+            # Preparar datos para enviar al frontend
+            for flow in flows:
+                flow_data = {
+                    'position': flow.position,
+                    'intent': flow.intent,
+                    'user_message': flow.user_message,
+                    'bot_response': flow.bot_response,
+                    'position_x': flow.position_x,
+                    'position_y': flow.position_y,
+                    'condition': flow.condition,
+                    'actions': flow.actions
+                }
+                flows_data.append(flow_data)
+            
+            for edge in edges:
+                edge_data = {
+                    'source': flow_id_to_position.get(edge.source_flow_id, str(edge.source_flow_id)),
+                    'target': flow_id_to_position.get(edge.target_flow_id, str(edge.target_flow_id)),
+                    'sourceHandle': edge.condition if edge.condition else None
+                }
+                edges_data.append(edge_data)
+        
+        # Construir la respuesta fuera del bloque with usando los datos recopilados
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'id': plubot_data['id'],
+                'name': plubot_data['name'],
+                'color': plubot_data['color'],
+                'initialMessage': welcome_message,
+                'embedConfig': {
+                    'theme': 'light',  # Por defecto
+                    'position': 'right'
+                },
+                'flows': flows_data,
+                'edges': edges_data
+            }
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error cargando chatbot público: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# Endpoint público para manejar mensajes del chat (sin autenticación JWT)
+@plubots_bp.route('/chat/<string:public_id>/message', methods=['POST'])
+def handle_chat_message(public_id):
+    try:
+        logger.info(f"Recibida solicitud POST a /chat/{public_id}/message")
+        data = request.get_json()
+        logger.info(f"Datos recibidos: {data}")
+        
+        if not data or 'message' not in data:
+            logger.warning("No se proporcionó un mensaje en la solicitud")
+            return jsonify({'status': 'error', 'message': 'Se requiere un mensaje'}), 400
+        
+        user_message = data['message']
+        current_flow_id = data.get('current_flow_id')
+        conversation_history = data.get('conversation_history', [])
+        
+        logger.info(f"Mensaje del usuario: '{user_message}', current_flow_id: {current_flow_id}")
+        
+        # Convertir public_id a int para buscar el plubot
+        try:
+            plubot_id = int(public_id)
+            logger.info(f"ID del plubot convertido: {plubot_id}")
+        except ValueError:
+            logger.warning(f"ID de chatbot inválido: {public_id}")
+            return jsonify({'status': 'error', 'message': 'ID de chatbot inválido'}), 400
+        
+        # Variables para almacenar datos fuera del bloque with
+        response = None
+        next_flow_id = None  # Almacenar solo el ID, no el objeto
+        is_decision_node = False
+        options = []
+        
+        # Usar get_session como context manager con with
+        with get_session() as session:
+            # Obtener el plubot
+            plubot = session.query(Plubot).filter(Plubot.id == plubot_id).first()
+            if not plubot:
+                logger.warning(f"Chatbot con ID {plubot_id} no encontrado")
+                return jsonify({'status': 'error', 'message': 'Chatbot no encontrado'}), 404
+            
+            logger.info(f"Plubot encontrado: {plubot.name} (ID: {plubot.id})")
+            
+            # Verificar si el webchat está habilitado
+            if not plubot.is_webchat_enabled:
+                logger.warning(f"Chatbot {plubot.id} no tiene habilitado el webchat")
+                return jsonify({'status': 'error', 'message': 'Este chatbot no está disponible para chat público'}), 403
+            
+            # Obtener flujos y bordes
+            flows = session.query(Flow).filter(Flow.chatbot_id == plubot.id).all()
+            edges = session.query(FlowEdge).filter(FlowEdge.chatbot_id == plubot.id).all()
+            
+            logger.info(f"Flujos encontrados: {len(flows)}, Bordes encontrados: {len(edges)}")
+            
+            # Crear mapeos útiles
+            flow_id_map = {flow.id: flow for flow in flows}
+            
+            # Lógica para determinar el siguiente flujo
+            next_flow = None
+            
+            # Si tenemos un current_flow_id, buscar los bordes que salen de ese nodo
+            if current_flow_id:
+                logger.info(f"Usando current_flow_id: {current_flow_id} para determinar el siguiente nodo")
+                
+                # Buscar bordes que salen del nodo actual
+                current_edges = [e for e in edges if e.source_flow_id == current_flow_id]
+                logger.info(f"Bordes encontrados desde el nodo actual: {len(current_edges)}")
+                
+                if current_edges:
+                    # Si hay múltiples bordes, intentar encontrar uno que coincida con el mensaje del usuario
+                    # Esto es útil para nodos de decisión donde el usuario selecciona una opción
+                    matching_edge = None
+                    
+                    # Primero intentar con coincidencia exacta de condición
+                    for edge in current_edges:
+                        if edge.condition and user_message.lower() == edge.condition.lower():
+                            matching_edge = edge
+                            logger.info(f"Coincidencia exacta con condición del borde: {edge.condition}")
+                            break
+                    
+                    # Si no hay coincidencia exacta, intentar con coincidencia parcial
+                    if not matching_edge:
+                        for edge in current_edges:
+                            if edge.condition and user_message.lower() in edge.condition.lower():
+                                matching_edge = edge
+                                logger.info(f"Coincidencia parcial con condición del borde: {edge.condition}")
+                                break
+                    
+                    # Si aún no hay coincidencia, usar el primer borde (comportamiento por defecto)
+                    if not matching_edge and current_edges:
+                        matching_edge = current_edges[0]
+                        logger.info(f"Usando primer borde por defecto: {matching_edge.source_flow_id} -> {matching_edge.target_flow_id}")
+                    
+                    # Si encontramos un borde, obtener el flujo destino
+                    if matching_edge:
+                        target_flow = flow_id_map.get(matching_edge.target_flow_id)
+                        if target_flow:
+                            logger.info(f"Flujo destino encontrado: ID {target_flow.id}")
+                            next_flow = target_flow
+                        else:
+                            logger.warning(f"No se encontró flujo destino para el borde {matching_edge.id}")
+                else:
+                    logger.info(f"No se encontraron bordes desde el nodo actual (ID: {current_flow_id})")
+                    
+                    # Si no hay bordes, verificar si es un nodo final
+                    current_flow = flow_id_map.get(current_flow_id)
+                    if current_flow and current_flow.intent == 'end':
+                        logger.info(f"El nodo actual (ID: {current_flow_id}) es un nodo final, reiniciando al nodo de inicio")
+                        
+                        # Reiniciar al nodo de inicio
+                        start_flows = [f for f in flows if f.intent == 'start']
+                        if start_flows:
+                            start_flow = start_flows[0]
+                            logger.info(f"Nodo de inicio encontrado: ID {start_flow.id}")
+                            
+                            # Buscar un borde que salga del nodo de inicio
+                            start_edge = next((e for e in edges if e.source_flow_id == start_flow.id), None)
+                            if start_edge:
+                                target_flow = flow_id_map.get(start_edge.target_flow_id)
+                                if target_flow:
+                                    logger.info(f"Flujo destino desde inicio encontrado: ID {target_flow.id}")
+                                    next_flow = target_flow
+                                else:
+                                    logger.warning(f"No se encontró flujo destino para el borde desde inicio {start_edge.id}")
+                            else:
+                                logger.info("No se encontraron bordes desde el nodo de inicio, usando el nodo de inicio")
+                                next_flow = start_flow
+            
+            # Si no tenemos un current_flow_id o no pudimos encontrar el siguiente nodo,
+            # usar la lógica original
+            if not next_flow:
+                # 1. Buscar un flujo que coincida con el mensaje del usuario
+                for flow in flows:
+                    if flow.user_message and user_message.lower() in flow.user_message.lower():
+                        logger.info(f"Encontrada coincidencia con flujo ID {flow.id}: '{flow.user_message}'")
+                        next_flow = flow
+                        break
+                
+                # 2. Si no hay coincidencia, buscar un nodo de inicio y seguir el primer borde
+                if not next_flow:
+                    logger.info("No se encontró coincidencia, buscando nodo de inicio")
+                    start_flows = [f for f in flows if f.intent == 'start']
+                    if start_flows:
+                        start_flow = start_flows[0]
+                        logger.info(f"Nodo de inicio encontrado: ID {start_flow.id}")
+                        
+                        # Buscar un borde que salga del nodo de inicio
+                        start_edge = next((e for e in edges if e.source_flow_id == start_flow.id), None)
+                        if start_edge:
+                            logger.info(f"Borde desde nodo de inicio encontrado: {start_edge.source_flow_id} -> {start_edge.target_flow_id}")
+                            target_flow = flow_id_map.get(start_edge.target_flow_id)
+                            if target_flow:
+                                logger.info(f"Flujo destino encontrado: ID {target_flow.id}")
+                                next_flow = target_flow
+                            else:
+                                logger.warning(f"No se encontró flujo destino para el borde {start_edge.id}")
+                        else:
+                            logger.info("No se encontraron bordes desde el nodo de inicio, usando el nodo de inicio")
+                            next_flow = start_flow
+                    else:
+                        logger.info("No se encontró nodo de inicio, buscando nodos de mensaje")
+                        message_flows = [f for f in flows if f.intent == 'message']
+                        if message_flows:
+                            logger.info(f"Usando primer nodo de mensaje: ID {message_flows[0].id}")
+                            next_flow = message_flows[0]
+                        else:
+                            logger.warning("No se encontraron nodos de mensaje")
+            
+            # Obtener la respuesta y otros datos necesarios dentro del bloque with
+            if next_flow:
+                logger.info(f"Usando flujo ID {next_flow.id} para respuesta: '{next_flow.bot_response}'")
+                response = next_flow.bot_response
+                next_flow_id = next_flow.id  # Guardar solo el ID, no el objeto
+                
+                # Verificar si es un nodo de decisión
+                if next_flow.intent == 'decision':
+                    logger.info(f"El flujo ID {next_flow.id} es un nodo de decisión")
+                    is_decision_node = True
+                    
+                    # Buscar bordes que salen del nodo de decisión
+                    decision_edges = [e for e in edges if e.source_flow_id == next_flow.id]
+                    logger.info(f"Bordes encontrados desde el nodo de decisión: {len(decision_edges)}")
+                    
+                    # Para cada borde, encontrar el flujo destino y agregarlo como opción
+                    for edge in decision_edges:
+                        target_flow = flow_id_map.get(edge.target_flow_id)
+                        if target_flow:
+                            option_label = edge.condition if edge.condition else "Opción"
+                            logger.info(f"Opción encontrada: {option_label} -> Flujo ID {target_flow.id}")
+                            # Guardar solo los datos necesarios, no el objeto
+                            options.append({
+                                "id": target_flow.id,
+                                "label": option_label,
+                                "message": target_flow.user_message
+                            })
+            else:
+                logger.warning("No se encontró un flujo para responder")
+                response = "Lo siento, no entiendo tu mensaje. ¿Puedes reformularlo?"
+            
+            # Incrementar contador de mensajes
+            plubot.message_count = (plubot.message_count or 0) + 1
+            session.commit()
+            logger.info(f"Contador de mensajes incrementado: {plubot.message_count}")
+            
+            # Crear el historial de conversación dentro del bloque with
+            if next_flow:
+                # Crear nuevos objetos para el historial, no usar referencias a objetos de la sesión
+                new_conversation_history = list(conversation_history) if conversation_history else []
+                new_conversation_history.append({
+                    "role": "user",
+                    "message": user_message
+                })
+                new_conversation_history.append({
+                    "role": "bot",
+                    "message": response,
+                    "flow_id": next_flow_id  # Usar el ID, no el objeto
+                })
+                conversation_history = new_conversation_history
+                logger.info("Historial de conversación actualizado")
+        
+        # Construir la respuesta fuera del bloque with usando solo datos primitivos
+        result = {
+            'status': 'success',
+            'response': response,
+            'conversation_history': conversation_history
+        }
+        
+        # Si tenemos un flujo siguiente, incluir su ID
+        if next_flow_id:
+            result['current_flow_id'] = next_flow_id
+        
+        # Si es un nodo de decisión, incluir las opciones
+        if is_decision_node and options:
+            result['is_decision'] = True
+            result['options'] = options
+            logger.info(f"Incluyendo {len(options)} opciones en la respuesta")
+        
+        logger.info("Enviando respuesta exitosa")
+        return jsonify(result), 200
+        
+    except Exception as e:
+        logger.error(f"Error procesando mensaje de chat: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500

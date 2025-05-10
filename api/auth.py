@@ -227,23 +227,28 @@ def get_profile():
             if not user:
                 return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
             
-            chatbots_data = [
-                {
-                    'id': bot.id,
-                    'name': bot.name,
-                    'tone': bot.tone,
-                    'purpose': bot.purpose,
-                    'whatsapp_number': bot.whatsapp_number,
-                    'initial_message': bot.initial_message,
-                    'business_info': bot.business_info,
-                    'pdf_url': bot.pdf_url,
-                    'image_url': bot.image_url,
-                    'created_at': bot.created_at.isoformat() if bot.created_at else None,
-                    'updated_at': bot.updated_at.isoformat() if bot.updated_at else None,
-                    'color': bot.color,
-                    'powers': bot.powers
-                } for bot in user.plubots
-            ]
+            # Asegurarse de que user.plubots exista antes de intentar iterar sobre él
+            chatbots_data = []
+            if hasattr(user, 'plubots') and user.plubots:
+                chatbots_data = [
+                    {
+                        'id': bot.id,
+                        'name': bot.name,
+                        'tone': bot.tone,
+                        'purpose': bot.purpose,
+                        'whatsapp_number': bot.whatsapp_number,
+                        'initial_message': bot.initial_message,
+                        'business_info': bot.business_info,
+                        'pdf_url': bot.pdf_url,
+                        'image_url': bot.image_url,
+                        'created_at': bot.created_at.isoformat() if bot.created_at else None,
+                        'updated_at': bot.updated_at.isoformat() if bot.updated_at else None,
+                        'color': bot.color,
+                        'powers': bot.powers
+                    } for bot in user.plubots
+                ]
+            else:
+                logger.info(f"Usuario {user_id} no tiene plubots asociados")
 
             return jsonify({
                 'status': 'success',
@@ -319,9 +324,7 @@ def update_profile():
         logger.exception(f"Error en /profile (PUT): {str(e)}")
         return jsonify({'status': 'error', 'message': 'Error al actualizar el perfil'}), 500
 
-@auth_bp.route('/profile/powers', methods
-
-=['POST', 'OPTIONS'])
+@auth_bp.route('/profile/powers', methods=['POST', 'OPTIONS'])
 @jwt_required()
 def add_power():
     if request.method == 'OPTIONS':

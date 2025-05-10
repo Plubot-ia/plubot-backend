@@ -7,6 +7,11 @@ plubot-backend/
 ├── e.py
 ├── estructura_proyecto.txt
 ├── plubot.log
+├── plubot.log.1
+├── plubot.log.2
+├── plubot.log.3
+├── plubot.log.4
+├── plubot.log.5
 ├── plubot_knowledge.db
 ├── render.yaml
 ├── requirements.txt
@@ -29,6 +34,7 @@ plubot-backend/
 │   ├── conversations.py
 │   ├── grok.py
 │   ├── integrations.py ✅ NUEVO — endpoints Google Sheets, Notion, Trello
+│   ├── opinion.py
 │   ├── plubots.py
 │   ├── quotas.py
 │   ├── subscribe.py
