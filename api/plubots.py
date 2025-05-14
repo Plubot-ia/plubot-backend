@@ -1139,3 +1139,150 @@ def handle_chat_message(public_id):
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@plubots_bp.route('/<int:plubot_id>/flow', methods=['GET', 'POST'])
+@jwt_required()
+def handle_flow(plubot_id):
+    """
+    Endpoint para manejar la carga y guardado de flujos de un plubot
+    GET: Obtener el flujo actual
+    POST: Guardar un nuevo flujo
+    """
+    user_id = get_jwt_identity()
+    
+    try:
+        with get_session() as session:
+            # Verificar que el plubot existe y pertenece al usuario
+            plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+            if not plubot:
+                return jsonify({'status': 'error', 'message': 'Plubot no encontrado o no tienes permisos'}), 404
+            
+            if request.method == 'GET':
+                # Obtener todos los flujos y aristas asociados al plubot
+                flows = session.query(Flow).filter_by(chatbot_id=plubot_id).all()
+                edges = session.query(FlowEdge).filter_by(chatbot_id=plubot_id).all()
+                
+                logger.debug(f"Flows recuperados para plubot_id {plubot_id}: {len(flows)}")
+                logger.debug(f"Edges recuperados para plubot_id {plubot_id}: {len(edges)}")
+                
+                # Convertir flujos a formato esperado por el frontend
+                nodes = []
+                for flow in flows:
+                    node = {
+                        'id': str(flow.id),
+                        'type': flow.intent or 'message',
+                        'position': {'x': flow.position_x or 0, 'y': flow.position_y or 0},
+                        'data': {
+                            'label': flow.user_message,
+                            'message': flow.bot_response
+                        }
+                    }
+                    nodes.append(node)
+                
+                # Convertir aristas a formato esperado por el frontend
+                formatted_edges = []
+                for edge in edges:
+                    formatted_edge = {
+                        'id': f"edge-{edge.source_flow_id}-{edge.target_flow_id}",
+                        'source': str(edge.source_flow_id),
+                        'target': str(edge.target_flow_id),
+                        'type': edge.edge_type or 'default',
+                        'sourceOriginal': str(edge.source_flow_id),
+                        'targetOriginal': str(edge.target_flow_id)
+                    }
+                    if edge.condition:
+                        formatted_edge['label'] = edge.condition
+                    
+                    formatted_edges.append(formatted_edge)
+                
+                return jsonify({
+                    'status': 'success',
+                    'data': {
+                        'nodes': nodes,
+                        'edges': formatted_edges,
+                        'name': plubot.name
+                    }
+                }), 200
+            
+            elif request.method == 'POST':
+                data = request.get_json()
+                if not data:
+                    return jsonify({'status': 'error', 'message': 'No se proporcionaron datos'}), 400
+                
+                nodes = data.get('nodes', [])
+                edges = data.get('edges', [])
+                name = data.get('name')
+                
+                # Actualizar nombre del plubot si se proporciona
+                if name:
+                    plubot.name = name
+                
+                # Eliminar flujos y aristas existentes para este plubot
+                session.query(Flow).filter_by(chatbot_id=plubot_id).delete()
+                session.query(FlowEdge).filter_by(chatbot_id=plubot_id).delete()
+                
+                # Crear mapa para almacenar la relación entre IDs del frontend y backend
+                node_id_map = {}
+                
+                # Guardar nuevos flujos
+                for node in nodes:
+                    node_id = node.get('id')
+                    node_type = node.get('type', 'message')
+                    position = node.get('position', {})
+                    data = node.get('data', {})
+                    
+                    # Crear nuevo flujo
+                    flow = Flow(
+                        chatbot_id=plubot_id,
+                        user_message=data.get('label', ''),
+                        bot_response=data.get('message', ''),
+                        position=0,  # Posición en la lista (legacy)
+                        intent=node_type,
+                        position_x=position.get('x', 0),
+                        position_y=position.get('y', 0)
+                    )
+                    
+                    session.add(flow)
+                    session.flush()  # Para obtener el ID generado
+                    
+                    # Guardar mapeo de IDs
+                    node_id_map[node_id] = flow.id
+                
+                # Guardar nuevas aristas
+                for edge in edges:
+                    source_id = edge.get('source')
+                    target_id = edge.get('target')
+                    edge_type = edge.get('type', 'default')
+                    condition = edge.get('label', '')
+                    
+                    # Usar IDs originales si están disponibles
+                    source_original = edge.get('sourceOriginal', source_id)
+                    target_original = edge.get('targetOriginal', target_id)
+                    
+                    # Mapear IDs del frontend a IDs del backend
+                    backend_source_id = node_id_map.get(source_id)
+                    backend_target_id = node_id_map.get(target_id)
+                    
+                    if backend_source_id and backend_target_id:
+                        flow_edge = FlowEdge(
+                            chatbot_id=plubot_id,
+                            source_flow_id=backend_source_id,
+                            target_flow_id=backend_target_id,
+                            condition=condition,
+                            edge_type=edge_type
+                        )
+                        session.add(flow_edge)
+                
+                session.commit()
+                
+                return jsonify({
+                    'status': 'success',
+                    'message': 'Flujo guardado correctamente'
+                }), 200
+        
+    except Exception as e:
+        logger.error(f"Error manejando flujo para plubot {plubot_id}: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
