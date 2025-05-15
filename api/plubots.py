@@ -12,6 +12,7 @@ from services.grok_service import call_grok
 from celery_tasks import process_pdf_async
 import logging
 import json
+import time
 
 plubots_bp = Blueprint('plubots', __name__)
 logger = logging.getLogger(__name__)
@@ -580,22 +581,27 @@ def update_bot(plubot_id):
                 session.query(Flow).filter_by(chatbot_id=plubot_id).delete(synchronize_session=False)
 
             flow_id_map = {}
+            node_id_map = {}
             new_flows = []
+            
+            # Primero, crear todos los flujos y guardar sus IDs
             for index, flow in enumerate(flows_to_save):
                 if not flow.get('user_message') or not flow.get('bot_response'):
                     continue
+                    
                 user_message = flow['user_message']
                 intent = flow.get('intent', 'general')
                 condition = flow.get('condition', '')
                 position_x = flow.get('position_x')
                 position_y = flow.get('position_y')
+                # Obtener el ID original del nodo enviado por el frontend
+                original_node_id = flow.get('node_id')
+                
                 # Asegurarse de que position_x y position_y sean números, usando 0.0 como valor por defecto
                 position_x = float(position_x) if position_x is not None else 0.0
                 position_y = float(position_y) if position_y is not None else 0.0
                 
-                # Crear un ID para el nodo compatible con ReactFlow
-                node_id = f"node-{index}"
-                
+                # Crear un flujo en la base de datos
                 flow_entry = Flow(
                     chatbot_id=plubot_id,
                     user_message=user_message,
@@ -603,42 +609,159 @@ def update_bot(plubot_id):
                     position=index,
                     intent=intent,
                     condition=condition,
-                    position_x=position_x,  # Usar valor validado
-                    position_y=position_y   # Usar valor validado
+                    position_x=position_x,
+                    position_y=position_y
                 )
+                
                 session.add(flow_entry)
                 new_flows.append(flow_entry)
-                session.flush()
+                session.flush()  # Para obtener el ID generado
+                
+                # Guardar el mapeo entre el ID original del nodo y el ID de la base de datos
+                if original_node_id:
+                    node_id_map[original_node_id] = flow_entry.id
+                    logger.info(f"Mapeando nodo original {original_node_id} a ID de BD {flow_entry.id}")
+                
+                # También guardar mapeos por índice y formato node-index para compatibilidad
                 flow_id_map[str(index)] = flow_entry.id
-                # También mapear el ID del nodo de ReactFlow al ID de la base de datos
-                flow_id_map[node_id] = flow_entry.id
+                flow_id_map[f"node-{index}"] = flow_entry.id
 
-            # Procesar los bordes asegurando que tengan sourceHandle válido
+            # Procesar las aristas con toda la información necesaria
+            logger.info(f"Procesando {len(edges_raw)} aristas para guardar")
+            
+            # Crear un mapa de IDs de nodos para buscar por node_id
+            node_id_to_flow_entry = {}
+            node_id_map = {}  # Mapa adicional para node_id -> flow_entry.id
+            
+            # Primero, crear un mapa de posición -> flow_entry.id
+            position_to_id = {}
+            for flow_entry in new_flows:
+                position_to_id[flow_entry.position] = flow_entry.id
+                
+            # Luego, mapear node_id -> position -> flow_entry.id
+            for i, flow in enumerate(flows_to_save):
+                node_id = flow.get('node_id')
+                if node_id and i < len(new_flows):
+                    flow_id = position_to_id.get(i)
+                    if flow_id:
+                        node_id_to_flow_entry[node_id] = flow_id
+                        node_id_map[node_id] = flow_id
+                        logger.info(f"Mapeando nodo {node_id} a flow_id {flow_id} (posición {i})")
+            
             for i, edge in enumerate(edges_raw):
-                # Extraer source y target, que pueden ser IDs de nodo o posiciones
-                source = edge.get('source')
-                target = edge.get('target')
-                
-                # Obtener los IDs de flujo correspondientes
-                source_id = flow_id_map.get(source)
-                target_id = flow_id_map.get(target)
-                
-                # Asegurarse de que sourceHandle nunca sea null
-                source_handle = edge.get('sourceHandle')
-                if source_handle is None or source_handle == 'null':
-                    source_handle = 'default'
-                
-                if source_id and target_id:
-                    # Crear un ID único para el borde
-                    edge_id = f"edge-{i}-{source}-{target}"
+                try:
+                    # Extraer todos los datos relevantes de la arista
+                    source = edge.get('source')
+                    target = edge.get('target')
+                    edge_type = edge.get('type', 'default')
+                    label = edge.get('label', '')
+                    source_handle = edge.get('sourceHandle')
+                    target_handle = edge.get('targetHandle')
+                    edge_id = edge.get('id')
+                    style = edge.get('style', {})
                     
-                    edge_entry = FlowEdge(
-                        chatbot_id=plubot_id,
-                        source_flow_id=source_id,
-                        target_flow_id=target_id,
-                        condition=source_handle
-                    )
-                    session.add(edge_entry)
+                    # Intentar obtener los IDs de la base de datos directamente
+                    source_id = node_id_to_flow_entry.get(source)
+                    target_id = node_id_to_flow_entry.get(target)
+                    
+                    logger.info(f"Arista {i+1}/{len(edges_raw)}: source={source}->{source_id}, target={target}->{target_id}, type={edge_type}")
+                    
+                    # Si no se encuentran los IDs, usar los IDs originales directamente
+                    if not source_id or not target_id:
+                        # Buscar los nodos por su posición en el flujo
+                        for flow_entry in new_flows:
+                            if not source_id and str(flow_entry.position) == source:
+                                source_id = flow_entry.id
+                                logger.info(f"Encontrado source_id={source_id} por posición {source}")
+                            if not target_id and str(flow_entry.position) == target:
+                                target_id = flow_entry.id
+                                logger.info(f"Encontrado target_id={target_id} por posición {target}")
+                    
+                    # No podemos usar los IDs originales directamente como IDs de flujo en la base de datos
+                    # porque no existen en la tabla flows. Debemos usar los IDs de los flujos que acabamos de crear.
+                    if not source_id or not target_id:
+                        logger.info(f"No se encontraron IDs para la arista: {source} -> {target}")
+                        
+                        # Buscar por posición en el array de flows_to_save
+                        source_pos = None
+                        target_pos = None
+                        
+                        for i, flow in enumerate(flows_to_save):
+                            if flow.get('node_id') == source:
+                                source_pos = i
+                                logger.info(f"Nodo source {source} está en posición {i}")
+                            if flow.get('node_id') == target:
+                                target_pos = i
+                                logger.info(f"Nodo target {target} está en posición {i}")
+                        
+                        # Usar el mapa de posición -> ID
+                        if source_pos is not None and source_pos in position_to_id:
+                            source_id = position_to_id[source_pos]
+                            logger.info(f"Encontrado source_id={source_id} para node_id={source} en posición {source_pos}")
+                        
+                        if target_pos is not None and target_pos in position_to_id:
+                            target_id = position_to_id[target_pos]
+                            logger.info(f"Encontrado target_id={target_id} para node_id={target} en posición {target_pos}")
+                    
+                    # Verificar que tenemos IDs válidos para source y target
+                    if not source_id or not target_id:
+                        logger.warning(f"No se pudieron mapear los IDs para la arista: {source} -> {target}")
+                        # Como último recurso, usar los primeros dos flujos disponibles
+                        if len(new_flows) >= 2:
+                            source_id = new_flows[0].id
+                            target_id = new_flows[1].id
+                            logger.info(f"Usando flujos alternativos: {source_id} -> {target_id}")
+                        else:
+                            continue
+                    
+                    # Guardar los metadatos de la arista en el campo condition como JSON
+                    edge_metadata = {
+                        "source_original": source,
+                        "target_original": target,
+                        "sourceHandle": source_handle,
+                        "targetHandle": target_handle,
+                        "edge_id": edge_id,
+                        "style": style
+                    }
+                    
+                    # Crear la arista en la base de datos
+                    try:
+                        edge_entry = FlowEdge(
+                            chatbot_id=plubot_id,
+                            source_flow_id=source_id,
+                            target_flow_id=target_id,
+                            condition=label + "|||" + json.dumps(edge_metadata) if label else "|||" + json.dumps(edge_metadata),
+                            edge_type=edge_type
+                        )
+                        
+                        session.add(edge_entry)
+                        logger.info(f"Arista añadida: {source_id} -> {target_id}")
+                    except Exception as e:
+                        logger.error(f"Error al crear arista: {e}")
+                        # Intentar una última alternativa: usar los primeros flujos disponibles
+                        if len(new_flows) >= 2:
+                            try:
+                                # Usar los primeros dos flujos como alternativa
+                                alt_source_id = new_flows[0].id
+                                alt_target_id = new_flows[1].id
+                                
+                                edge_entry = FlowEdge(
+                                    chatbot_id=plubot_id,
+                                    source_flow_id=alt_source_id,
+                                    target_flow_id=alt_target_id,
+                                    condition=label + "|||" + json.dumps(edge_metadata) if label else "|||" + json.dumps(edge_metadata),
+                                    edge_type=edge_type
+                                )
+                                
+                                session.add(edge_entry)
+                                logger.info(f"Arista alternativa añadida: {alt_source_id} -> {alt_target_id}")
+                            except Exception as e2:
+                                logger.error(f"Error al crear arista alternativa: {e2}")
+                                continue
+                except Exception as e:
+                    logger.error(f"Error al procesar arista {i+1}/{len(edges_raw)}: {e}")
+                    # Continuar con la siguiente arista
+                    continue
 
             session.commit()
             return jsonify({
@@ -1166,6 +1289,12 @@ def handle_flow(plubot_id):
                 logger.debug(f"Flows recuperados para plubot_id {plubot_id}: {len(flows)}")
                 logger.debug(f"Edges recuperados para plubot_id {plubot_id}: {len(edges)}")
                 
+                # Crear un mapa de IDs de flujos a node_ids para reconstruir las aristas
+                flow_id_to_node = {}
+                for flow in flows:
+                    # El node_id será el ID del flujo en la base de datos como string
+                    flow_id_to_node[flow.id] = str(flow.id)
+                
                 # Convertir flujos a formato esperado por el frontend
                 nodes = []
                 for flow in flows:
@@ -1182,19 +1311,91 @@ def handle_flow(plubot_id):
                 
                 # Convertir aristas a formato esperado por el frontend
                 formatted_edges = []
+                logger.info(f"Procesando {len(edges)} aristas para enviar al frontend")
+                
                 for edge in edges:
-                    formatted_edge = {
-                        'id': f"edge-{edge.source_flow_id}-{edge.target_flow_id}",
-                        'source': str(edge.source_flow_id),
-                        'target': str(edge.target_flow_id),
-                        'type': edge.edge_type or 'default',
-                        'sourceOriginal': str(edge.source_flow_id),
-                        'targetOriginal': str(edge.target_flow_id)
-                    }
-                    if edge.condition:
-                        formatted_edge['label'] = edge.condition
-                    
-                    formatted_edges.append(formatted_edge)
+                    try:
+                        # Intentar acceder a edge_type de manera segura
+                        edge_type = getattr(edge, 'edge_type', 'default')
+                        
+                        # Extraer los IDs originales y handles del campo condition si están disponibles
+                        source_id = str(edge.source_flow_id)
+                        target_id = str(edge.target_flow_id)
+                        source_handle = None
+                        target_handle = None
+                        label = None
+                        edge_id = None
+                        style = {}
+                        
+                        # Intentar extraer metadatos del campo condition
+                        if edge.condition:
+                            # Verificar si tenemos metadatos en el campo condition
+                            parts = edge.condition.split('|||')
+                            if len(parts) > 1:
+                                # Si hay metadatos, extraerlos
+                                label = parts[0] if parts[0] else None
+                                try:
+                                    metadata = json.loads(parts[1])
+                                    # Usar los IDs originales si están disponibles
+                                    if metadata.get('source_original'):
+                                        source_id = metadata.get('source_original')
+                                    if metadata.get('target_original'):
+                                        target_id = metadata.get('target_original')
+                                    source_handle = metadata.get('sourceHandle')
+                                    target_handle = metadata.get('targetHandle')
+                                    edge_id = metadata.get('edge_id')
+                                    style = metadata.get('style', {})
+                                    logger.info(f"Metadatos recuperados para arista: {source_id} -> {target_id}")
+                                except json.JSONDecodeError as e:
+                                    # Si no podemos decodificar los metadatos, usamos la condición como etiqueta
+                                    logger.error(f"Error decodificando metadatos: {e}")
+                                    label = edge.condition
+                            else:
+                                # Si no hay metadatos, usamos la condición como etiqueta
+                                label = edge.condition
+                        
+                        # Si no tenemos IDs originales, usar los IDs de la base de datos pero asegurarnos de que sean strings
+                        if not source_id:
+                            source_id = str(edge.source_flow_id)
+                        if not target_id:
+                            target_id = str(edge.target_flow_id)
+                        
+                        # Crear un ID único para la arista
+                        if not edge_id:
+                            edge_id = f"edge-{source_id}-{target_id}-{int(time.time() * 1000)}"  # Añadir timestamp para garantizar unicidad
+                        
+                        formatted_edge = {
+                            'id': edge_id,
+                            'source': source_id,
+                            'target': target_id,
+                            'type': edge_type,
+                            'sourceOriginal': source_id,  # Guardar el ID original como referencia
+                            'targetOriginal': target_id   # Guardar el ID original como referencia
+                        }
+                        
+                        # Añadir handles si están disponibles
+                        if source_handle:
+                            formatted_edge['sourceHandle'] = source_handle
+                        if target_handle:
+                            formatted_edge['targetHandle'] = target_handle
+                        
+                        # Añadir estilo si está disponible
+                        if style:
+                            formatted_edge['style'] = style
+                        
+                        # Añadir etiqueta si está disponible
+                        if label:
+                            formatted_edge['label'] = label
+                        
+                        logger.info(f"Arista formateada: {formatted_edge}")
+                        formatted_edges.append(formatted_edge)
+                    except Exception as e:
+                        logger.error(f"Error al formatear arista {edge.id}: {e}")
+                        # Continuar con la siguiente arista
+                        continue
+                
+                logger.info(f"Total de aristas formateadas: {len(formatted_edges)}")
+                
                 
                 return jsonify({
                     'status': 'success',
@@ -1250,31 +1451,97 @@ def handle_flow(plubot_id):
                     node_id_map[node_id] = flow.id
                 
                 # Guardar nuevas aristas
-                for edge in edges:
-                    source_id = edge.get('source')
-                    target_id = edge.get('target')
-                    edge_type = edge.get('type', 'default')
-                    condition = edge.get('label', '')
-                    
-                    # Usar IDs originales si están disponibles
-                    source_original = edge.get('sourceOriginal', source_id)
-                    target_original = edge.get('targetOriginal', target_id)
-                    
-                    # Mapear IDs del frontend a IDs del backend
-                    backend_source_id = node_id_map.get(source_id)
-                    backend_target_id = node_id_map.get(target_id)
-                    
-                    if backend_source_id and backend_target_id:
-                        flow_edge = FlowEdge(
-                            chatbot_id=plubot_id,
-                            source_flow_id=backend_source_id,
-                            target_flow_id=backend_target_id,
-                            condition=condition,
-                            edge_type=edge_type
-                        )
-                        session.add(flow_edge)
+                logger.info(f"Procesando {len(edges)} aristas para guardar")
                 
+                for i, edge in enumerate(edges):
+                    try:
+                        source_id = edge.get('source')
+                        target_id = edge.get('target')
+                        edge_type = edge.get('type', 'default')
+                        condition = edge.get('label', '')
+                        source_handle = edge.get('sourceHandle')
+                        target_handle = edge.get('targetHandle')
+                        
+                        logger.info(f"Arista {i+1}/{len(edges)}: source={source_id}, target={target_id}, type={edge_type}")
+                        
+                        # Guardar los IDs originales del frontend para recuperarlos después
+                        source_original = source_id
+                        target_original = target_id
+                        
+                        # Mapear IDs del frontend a IDs del backend
+                        backend_source_id = node_id_map.get(source_id)
+                        backend_target_id = node_id_map.get(target_id)
+                        
+                        logger.info(f"IDs mapeados: source={source_id}->{backend_source_id}, target={target_id}->{backend_target_id}")
+                        
+                        if backend_source_id and backend_target_id:
+                            # Crear el objeto FlowEdge con los campos básicos
+                            flow_edge = FlowEdge(
+                                chatbot_id=plubot_id,
+                                source_flow_id=backend_source_id,
+                                target_flow_id=backend_target_id,
+                                condition=condition
+                            )
+                            
+                            # Guardar los IDs originales y handles en el campo condition como JSON
+                            # Esto nos permitirá recuperar los IDs originales al cargar las aristas
+                            edge_metadata = {
+                                "source_original": source_original,
+                                "target_original": target_original,
+                                "sourceHandle": source_handle,
+                                "targetHandle": target_handle
+                            }
+                            
+                            # Si ya hay una condición, la preservamos
+                            if condition:
+                                flow_edge.condition = condition + "|||" + json.dumps(edge_metadata)
+                            else:
+                                flow_edge.condition = "|||" + json.dumps(edge_metadata)
+                            
+                            # Intentar establecer edge_type de manera segura
+                            try:
+                                flow_edge.edge_type = edge_type
+                                logger.info(f"edge_type establecido correctamente: {edge_type}")
+                            except AttributeError as e:
+                                # Si edge_type no está disponible, lo manejamos a nivel de base de datos
+                                logger.error(f"Error al establecer edge_type: {e}")
+                                # Después de añadir el objeto, actualizaremos edge_type directamente en la base de datos
+                            
+                            session.add(flow_edge)
+                            logger.info(f"Arista añadida a la sesión: {flow_edge.source_flow_id} -> {flow_edge.target_flow_id}")
+                            
+                            # Guardar el edge_type para actualizarlo después si es necesario
+                            if 'edge_type_update' not in locals():
+                                edge_type_update = []
+                            edge_type_update.append((flow_edge, edge_type))
+                        else:
+                            logger.warning(f"No se pudo mapear los IDs de la arista: {source_id} -> {target_id}")
+                    except Exception as e:
+                        logger.error(f"Error al procesar arista {i+1}/{len(edges)}: {e}")
+                        # Continuar con la siguiente arista
+                        continue
+                
+                # Primero hacemos commit para obtener los IDs de las aristas
                 session.commit()
+                
+                # Ahora actualizamos edge_type directamente en la base de datos si fue necesario
+                if 'edge_type_update' in locals() and edge_type_update:
+                    for edge_obj, edge_type_value in edge_type_update:
+                        try:
+                            # Verificar si podemos acceder al atributo normalmente
+                            if hasattr(edge_obj, 'edge_type'):
+                                continue  # Si ya tiene el atributo, no necesitamos actualizar
+                                
+                            # Actualizar directamente en la base de datos
+                            session.execute(
+                                "UPDATE flow_edges SET edge_type = :edge_type WHERE id = :edge_id",
+                                {"edge_type": edge_type_value, "edge_id": edge_obj.id}
+                            )
+                        except Exception as e:
+                            print(f"Error al actualizar edge_type: {e}")
+                    
+                    # Commit los cambios de la actualización directa
+                    session.commit()
                 
                 return jsonify({
                     'status': 'success',

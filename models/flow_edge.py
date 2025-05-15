@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Text, ForeignKey
+from sqlalchemy import Column, Integer, Text, ForeignKey, String
 from models import Base
 
 class FlowEdge(Base):
@@ -8,3 +8,4 @@ class FlowEdge(Base):
     source_flow_id = Column(Integer, ForeignKey('flows.id', ondelete='CASCADE'), nullable=False)
     target_flow_id = Column(Integer, ForeignKey('flows.id', ondelete='CASCADE'), nullable=False)
     condition = Column(Text, default="")
+    edge_type = Column(String(50), default="default")  # Añadido para compatibilidad con el frontend
