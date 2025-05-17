@@ -92,6 +92,11 @@ def create():
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def catch_all(path):
+    # No capturar rutas que comiencen con /api
+    if path.startswith('api/'):
+        logger.warning(f"Ruta de API no encontrada: {request.method} {path}")
+        return jsonify({'status': 'error', 'message': f'Ruta de API no encontrada: {path}'}), 404
+    
     logger.info(f"Solicitud atrapada en catch_all: {request.method} {path}")
     return jsonify({'status': 'error', 'message': 'Este es el backend de Plubot. Usa el frontend en https://plubot.com'}), 404
 
