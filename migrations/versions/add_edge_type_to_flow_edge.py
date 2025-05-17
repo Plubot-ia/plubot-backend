@@ -17,16 +17,36 @@ depends_on = None
 
 
 def upgrade():
-    # Añadir la columna edge_type a la tabla flow_edges
-    op.add_column('flow_edges', sa.Column('edge_type', sa.String(50), nullable=True))
+    # Verificar si la columna edge_type ya existe en la tabla flow_edges
+    from sqlalchemy.engine.reflection import Inspector
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
     
-    # Actualizar los registros existentes para establecer un valor por defecto
-    op.execute("UPDATE flow_edges SET edge_type = 'default' WHERE edge_type IS NULL")
+    # Obtener las columnas existentes en la tabla flow_edges
+    columns = [c['name'] for c in inspector.get_columns('flow_edges')]
     
-    # Hacer la columna no nullable después de actualizar los valores existentes
-    op.alter_column('flow_edges', 'edge_type', nullable=False, server_default='default')
+    # Solo agregar la columna si no existe
+    if 'edge_type' not in columns:
+        # Añadir la columna edge_type a la tabla flow_edges
+        op.add_column('flow_edges', sa.Column('edge_type', sa.String(50), nullable=True))
+        
+        # Actualizar los registros existentes para establecer un valor por defecto
+        op.execute("UPDATE flow_edges SET edge_type = 'default' WHERE edge_type IS NULL")
+        
+        # Hacer la columna no nullable después de actualizar los valores existentes
+        op.alter_column('flow_edges', 'edge_type', nullable=False, server_default='default')
 
 
 def downgrade():
-    # Eliminar la columna edge_type de la tabla flow_edges
-    op.drop_column('flow_edges', 'edge_type')
+    # Verificar si la columna edge_type existe en la tabla flow_edges
+    from sqlalchemy.engine.reflection import Inspector
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    
+    # Obtener las columnas existentes en la tabla flow_edges
+    columns = [c['name'] for c in inspector.get_columns('flow_edges')]
+    
+    # Solo eliminar la columna si existe
+    if 'edge_type' in columns:
+        # Eliminar la columna edge_type de la tabla flow_edges
+        op.drop_column('flow_edges', 'edge_type')

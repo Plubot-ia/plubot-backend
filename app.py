@@ -15,7 +15,8 @@ from api import api_bp
 from models import db
 from api.grok import grok_bp
 from api.integrations import integrations_bp
-from api.opinion import opinion_bp  # Nueva importación
+from api.opinion import opinion_bp
+from api.flow_api import flow_bp  # Nuevo blueprint para la API de flujos optimizada
 
 # Configuración de logging
 setup_logging()
@@ -32,20 +33,36 @@ jwt = JWTManager(app)
 mail = Mail(app)
 
 # Configuración de CORS
-CORS(app, resources={r"/*": {
-    "origins": [
-        "http://localhost:5173",
-        "http://192.168.0.213:5173",
-        "https://www.plubot.com",
-        "https://plubot.com",
-        "https://plubot-frontend.vercel.app",
-        "https://staging.plubot.com"
-    ],
-    "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-    "allow_headers": ["Content-Type", "Authorization"],
-    "supports_credentials": True,
-    "expose_headers": ["Content-Type", "Authorization"]
-}})
+if app.config.get('ENV') == 'development':
+    # Configuración más permisiva para desarrollo
+    CORS(app, resources={"/*": {
+        "origins": "*",  # Permitir todos los orígenes en desarrollo
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+        "supports_credentials": True,
+        "expose_headers": ["Content-Type", "Authorization"]
+    }})
+    
+    # Log de todas las peticiones en desarrollo
+    @app.before_request
+    def log_request_info():
+        logger.info(f'Request: {request.method} {request.path} Headers: {dict(request.headers)}')
+else:
+    # Configuración de producción
+    CORS(app, resources={"/*": {
+        "origins": [
+            "http://localhost:5173",
+            "http://192.168.0.213:5173",
+            "https://www.plubot.com",
+            "https://plubot.com",
+            "https://plubot-frontend.vercel.app",
+            "https://staging.plubot.com"
+        ],
+        "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True,
+        "expose_headers": ["Content-Type", "Authorization"]
+    }})
 
 # Manejo de errores de autenticación
 @jwt.unauthorized_loader
@@ -65,7 +82,8 @@ def handle_auth_error(e):
 app.register_blueprint(api_bp, url_prefix='/api')
 app.register_blueprint(grok_bp, url_prefix='/api')
 app.register_blueprint(integrations_bp, url_prefix='/api/integrations')
-app.register_blueprint(opinion_bp, url_prefix='/api')  # Nuevo registro
+app.register_blueprint(opinion_bp, url_prefix='/api/opinion')
+app.register_blueprint(flow_bp, url_prefix='/api/flow')  # Nuevo endpoint optimizado para flujos  # Nuevo registro
 
 @app.route('/create', methods=['GET', 'POST'])
 def create():
