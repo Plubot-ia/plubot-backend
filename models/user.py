@@ -14,6 +14,10 @@ class User(Base):
     role = Column(String, default='user')
     is_verified = Column(Boolean, default=False)
     
+    # Campos para autenticación con Google
+    google_id = Column(String, unique=True, nullable=True)
+    google_refresh_token = Column(String, nullable=True)
+    
     # Nuevos campos para el perfil
     profile_picture = Column(String, nullable=True)
     bio = Column(Text, nullable=True)
