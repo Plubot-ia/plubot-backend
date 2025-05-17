@@ -90,7 +90,12 @@ def login():
     if request.method == 'OPTIONS':
         return jsonify({'message': 'Preflight OK'}), 200
     try:
-        data = LoginModel(**request.form)
+        # Aceptar tanto form-data como JSON
+        if request.is_json:
+            data = LoginModel(**request.get_json())
+        else:
+            data = LoginModel(**request.form)
+            
         logger.info(f"Email recibido en login: '{data.email}'")
         logger.info(f"Password recibido: '{data.password}'")
         with get_session() as session:
@@ -129,7 +134,12 @@ def logout():
 def forgot_password():
     if request.method == 'OPTIONS':
         return jsonify({'message': 'Preflight OK'}), 200
-    email = request.form.get('email')
+        
+    # Aceptar tanto form-data como JSON
+    if request.is_json:
+        email = request.get_json().get('email')
+    else:
+        email = request.form.get('email')
     if email is None:
         logger.info("No se recibió email en la solicitud (email es None)")
         return jsonify({'status': 'error', 'message': 'Email no proporcionado.'}), 400
@@ -155,12 +165,22 @@ def forgot_password():
         mail.send(msg)
         return jsonify({'status': 'success', 'message': 'Se ha enviado un enlace de restablecimiento a tu correo.'}), 200
 
-@auth_bp.route('/reset_password/<token>', methods=['GET', 'POST', 'OPTIONS'])
-def reset_password(token):
+@auth_bp.route('/reset_password', methods=['POST', 'OPTIONS'])
+def reset_password():
     if request.method == 'OPTIONS':
         return jsonify({'message': 'Preflight OK'}), 200
-    if request.method == 'GET':
-        return jsonify({'status': 'error', 'message': 'Por favor usa el frontend en http://localhost:5173'}), 400
+        
+    # Aceptar tanto form-data como JSON
+    if request.is_json:
+        json_data = request.get_json()
+        token = json_data.get('token')
+        new_password = json_data.get('new_password')
+        confirm_password = json_data.get('confirm_password')
+    else:
+        token = request.form.get('token')
+        new_password = request.form.get('new_password')
+        confirm_password = request.form.get('confirm_password')
+        
     try:
         logger.info(f"Procesando reset_password para token: {token}")
         user_id = decode_token(token)['sub']
@@ -170,10 +190,6 @@ def reset_password(token):
             if not user:
                 logger.info(f"No se encontró usuario con ID: {user_id}")
                 return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
-            new_password = request.form.get('new_password')
-            confirm_password = request.form.get('confirm_password')
-            logger.info(f"New password recibido: {'****' if new_password else 'None'}")
-            logger.info(f"Confirm password recibido: {'****' if confirm_password else 'None'}")
             if not new_password or not confirm_password:
                 return jsonify({'status': 'error', 'message': 'Se requieren ambas contraseñas.'}), 400
             if new_password != confirm_password:
@@ -195,26 +211,37 @@ def reset_password(token):
 def change_password():
     if request.method == 'OPTIONS':
         return jsonify({'message': 'Preflight OK'}), 200
-    user_id = get_jwt_identity()
-    current_password = request.form.get('current_password')
-    new_password = request.form.get('new_password')
-    confirm_password = request.form.get('confirm_password')
-
-    with get_session() as session:
-        user = session.query(User).filter_by(id=user_id).first()
-        if not user or not bcrypt.checkpw(current_password.encode('utf-8'), user.password.encode('utf-8')):
-            return jsonify({'status': 'error', 'message': 'La contraseña actual es incorrecta.'}), 400
-        if new_password != confirm_password:
-            return jsonify({'status': 'error', 'message': 'Las contraseñas nuevas no coinciden.'}), 400
-        user.password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        session.commit()
-        msg = Message(
-            subject="Tu contraseña ha sido cambiada",
-            recipients=[user.email],
-            body="Hola,\n\nTu contraseña ha sido cambiada exitosamente.\n\nSi no realizaste este cambio, por favor contáctanos de inmediato.\n\nSaludos,\nEl equipo de Plubot"
-        )
-        mail.send(msg)
-        return jsonify({'status': 'success', 'message': 'Contraseña cambiada con éxito.'}), 200
+    try:
+        user_id = get_jwt_identity()
+        # Aceptar tanto form-data como JSON
+        if request.is_json:
+            json_data = request.get_json()
+            current_password = json_data.get('current_password')
+            new_password = json_data.get('new_password')
+            confirm_password = json_data.get('confirm_password')
+        else:
+            current_password = request.form.get('current_password')
+            new_password = request.form.get('new_password')
+            confirm_password = request.form.get('confirm_password')
+            
+        with get_session() as session:
+            user = session.query(User).filter_by(id=user_id).first()
+            if not user or not bcrypt.checkpw(current_password.encode('utf-8'), user.password.encode('utf-8')):
+                return jsonify({'status': 'error', 'message': 'La contraseña actual es incorrecta.'}), 400
+            if new_password != confirm_password:
+                return jsonify({'status': 'error', 'message': 'Las contraseñas nuevas no coinciden.'}), 400
+            user.password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            session.commit()
+            msg = Message(
+                subject="Tu contraseña ha sido cambiada",
+                recipients=[user.email],
+                body="Hola,\n\nTu contraseña ha sido cambiada exitosamente.\n\nSi no realizaste este cambio, por favor contáctanos de inmediato.\n\nSaludos,\nEl equipo de Plubot"
+            )
+            mail.send(msg)
+            return jsonify({'status': 'success', 'message': 'Contraseña cambiada con éxito.'}), 200
+    except Exception as e:
+        logger.exception(f"Error en /change_password: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @auth_bp.route('/profile', methods=['GET'])
 @jwt_required()

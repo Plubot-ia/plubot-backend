@@ -1364,13 +1364,19 @@ def handle_flow(plubot_id):
                         if not edge_id:
                             edge_id = f"edge-{source_id}-{target_id}-{int(time.time() * 1000)}"  # Añadir timestamp para garantizar unicidad
                         
+                        # Guardar también los IDs de la base de datos para facilitar el mapeo en el frontend
+                        source_backend_id = str(edge.source_flow_id)
+                        target_backend_id = str(edge.target_flow_id)
+                        
                         formatted_edge = {
                             'id': edge_id,
                             'source': source_id,
                             'target': target_id,
                             'type': edge_type,
                             'sourceOriginal': source_id,  # Guardar el ID original como referencia
-                            'targetOriginal': target_id   # Guardar el ID original como referencia
+                            'targetOriginal': target_id,  # Guardar el ID original como referencia
+                            'source_id': source_backend_id,  # ID en la base de datos para mapeo
+                            'target_id': target_backend_id   # ID en la base de datos para mapeo
                         }
                         
                         # Añadir handles si están disponibles
@@ -1455,24 +1461,175 @@ def handle_flow(plubot_id):
                 
                 for i, edge in enumerate(edges):
                     try:
+                        # Extraer todos los posibles identificadores de source y target
                         source_id = edge.get('source')
                         target_id = edge.get('target')
+                        source_original = edge.get('sourceOriginal', source_id)
+                        target_original = edge.get('targetOriginal', target_id)
+                        source_backend_id = edge.get('source_id')
+                        target_backend_id = edge.get('target_id')
                         edge_type = edge.get('type', 'default')
                         condition = edge.get('label', '')
                         source_handle = edge.get('sourceHandle')
                         target_handle = edge.get('targetHandle')
+                        edge_id = edge.get('id')
+                        edge_style = edge.get('style', {})
                         
                         logger.info(f"Arista {i+1}/{len(edges)}: source={source_id}, target={target_id}, type={edge_type}")
+                        logger.info(f"  IDs originales: source={source_original}, target={target_original}")
+                        if source_backend_id:
+                            logger.info(f"  IDs backend: source={source_backend_id}, target={target_backend_id}")
                         
-                        # Guardar los IDs originales del frontend para recuperarlos después
-                        source_original = source_id
-                        target_original = target_id
+                        # Mapear IDs del frontend a IDs del backend usando múltiples estrategias
+                        backend_source_id = None
+                        backend_target_id = None
                         
-                        # Mapear IDs del frontend a IDs del backend
-                        backend_source_id = node_id_map.get(source_id)
-                        backend_target_id = node_id_map.get(target_id)
+                        # Estrategia 1: Usar el mapa de IDs proporcionado
+                        if source_id in node_id_map:
+                            backend_source_id = node_id_map[source_id]
+                        
+                        if target_id in node_id_map:
+                            backend_target_id = node_id_map[target_id]
+                        
+                        # Estrategia 2: Probar con source_id/target_id si están disponibles
+                        if not backend_source_id and source_backend_id and source_backend_id in node_id_map:
+                            backend_source_id = node_id_map[source_backend_id]
+                        
+                        if not backend_target_id and target_backend_id and target_backend_id in node_id_map:
+                            backend_target_id = node_id_map[target_backend_id]
+                        
+                        # Estrategia 3: Probar con sourceOriginal/targetOriginal
+                        if not backend_source_id and source_original and source_original in node_id_map:
+                            backend_source_id = node_id_map[source_original]
+                        
+                        if not backend_target_id and target_original and target_original in node_id_map:
+                            backend_target_id = node_id_map[target_original]
+                        
+                        # Estrategia 4: Si el ID tiene formato 'node-X', intentar con X
+                        if not backend_source_id and isinstance(source_id, str) and source_id.startswith('node-'):
+                            numeric_id = source_id.replace('node-', '')
+                            if numeric_id in node_id_map:
+                                backend_source_id = node_id_map[numeric_id]
+                                
+                        # Estrategia 5: Buscar directamente en la base de datos por ID
+                        if not backend_source_id:
+                            # Buscar el nodo directamente en la base de datos
+                            source_node = session.query(Flow).filter(
+                                Flow.chatbot_id == plubot_id,
+                                Flow.node_id == source_id
+                            ).first()
+                            if source_node:
+                                backend_source_id = source_node.id
+                                logger.info(f"Encontrado source_id={source_id} en la base de datos con ID={backend_source_id}")
+                        
+                        if not backend_target_id and isinstance(target_id, str) and target_id.startswith('node-'):
+                            numeric_id = target_id.replace('node-', '')
+                            if numeric_id in node_id_map:
+                                backend_target_id = node_id_map[numeric_id]
+                        
+                        # Estrategia 5: Buscar directamente en la base de datos por ID para target
+                        if not backend_target_id:
+                            # Buscar el nodo directamente en la base de datos
+                            target_node = session.query(Flow).filter(
+                                Flow.chatbot_id == plubot_id,
+                                Flow.node_id == target_id
+                            ).first()
+                            if target_node:
+                                backend_target_id = target_node.id
+                                logger.info(f"Encontrado target_id={target_id} en la base de datos con ID={backend_target_id}")
                         
                         logger.info(f"IDs mapeados: source={source_id}->{backend_source_id}, target={target_id}->{backend_target_id}")
+                        
+                        # Si no se pudieron mapear los IDs, intentar encontrar los nodos por posición
+                        if not backend_source_id or not backend_target_id:
+                            logger.warning(f"No se pudieron mapear los IDs para la arista: {source_id} -> {target_id}")
+                            
+                            # Buscar los nodos por posición en el flujo
+                            try:
+                                # Intentar encontrar los nodos por su posición en el flujo
+                                source_position = next((n.get('position') for n in flows if n.get('node_id') == source_id), None)
+                                target_position = next((n.get('position') for n in flows if n.get('node_id') == target_id), None)
+                                
+                                if source_position is not None and target_position is not None:
+                                    # Buscar los nodos por posición en la base de datos
+                                    source_node = session.query(Flow).filter(
+                                        Flow.chatbot_id == plubot_id,
+                                        Flow.position == source_position
+                                    ).first()
+                                    
+                                    target_node = session.query(Flow).filter(
+                                        Flow.chatbot_id == plubot_id,
+                                        Flow.position == target_position
+                                    ).first()
+                                    
+                                    if source_node and target_node:
+                                        backend_source_id = source_node.id
+                                        backend_target_id = target_node.id
+                                        logger.info(f"Nodos encontrados por posición: {source_position} -> {source_node.id}, {target_position} -> {target_node.id}")
+                            except Exception as e:
+                                logger.error(f"Error al buscar nodos por posición: {e}")
+                        
+                        # Si aún no se pudieron mapear, usar los IDs originales de los nodos
+                        if not backend_source_id or not backend_target_id:
+                            # Buscar todos los nodos del plubot
+                            all_nodes = session.query(Flow).filter(Flow.chatbot_id == plubot_id).all()
+                            node_map = {node.node_id: node.id for node in all_nodes if node.node_id}
+                            
+                            # Intentar mapear usando los IDs originales
+                            if source_id in node_map:
+                                backend_source_id = node_map[source_id]
+                                logger.info(f"Mapeado source_id por node_id: {source_id} -> {backend_source_id}")
+                            if target_id in node_map:
+                                backend_target_id = node_map[target_id]
+                                logger.info(f"Mapeado target_id por node_id: {target_id} -> {backend_target_id}")
+                            
+                            # Intentar mapear por posición si los IDs tienen formato 'node-X'
+                            if not backend_source_id or not backend_target_id:
+                                try:
+                                    # Extraer posición numérica si el ID es 'node-X'
+                                    source_position = None
+                                    target_position = None
+                                    
+                                    if isinstance(source_id, str) and source_id.startswith('node-'):
+                                        try:
+                                            source_position = int(source_id.replace('node-', ''))
+                                        except ValueError:
+                                            pass
+                                    
+                                    if isinstance(target_id, str) and target_id.startswith('node-'):
+                                        try:
+                                            target_position = int(target_id.replace('node-', ''))
+                                        except ValueError:
+                                            pass
+                                    
+                                    # Ordenar nodos por posición para mapeo confiable
+                                    sorted_nodes = sorted(all_nodes, key=lambda n: n.position if n.position is not None else 999)
+                                    
+                                    # Mapear source por posición
+                                    if not backend_source_id and source_position is not None and source_position < len(sorted_nodes):
+                                        backend_source_id = sorted_nodes[source_position].id
+                                        logger.info(f"Mapeado source_id por posición {source_position} -> {backend_source_id}")
+                                    
+                                    # Mapear target por posición
+                                    if not backend_target_id and target_position is not None and target_position < len(sorted_nodes):
+                                        backend_target_id = sorted_nodes[target_position].id
+                                        logger.info(f"Mapeado target_id por posición {target_position} -> {backend_target_id}")
+                                except Exception as e:
+                                    logger.error(f"Error al mapear por posición: {e}")
+                            
+                            # Si aún no se pudieron mapear, usar los primeros dos nodos disponibles
+                            if not backend_source_id or not backend_target_id:
+                                if len(all_nodes) >= 2:
+                                    logger.warning(f"Usando nodos alternativos para la arista: {source_id} -> {target_id}")
+                                    # Usar los primeros dos nodos disponibles pero guardar los IDs originales en los metadatos
+                                    if not backend_source_id:
+                                        backend_source_id = all_nodes[0].id
+                                    if not backend_target_id:
+                                        backend_target_id = all_nodes[1].id if len(all_nodes) > 1 else all_nodes[0].id
+                                    
+                                    logger.info(f"Usando nodos alternativos: {backend_source_id} -> {backend_target_id}")
+                                else:
+                                    logger.error(f"No hay suficientes nodos para mapear la arista: {source_id} -> {target_id}")
                         
                         if backend_source_id and backend_target_id:
                             # Crear el objeto FlowEdge con los campos básicos
@@ -1489,7 +1646,9 @@ def handle_flow(plubot_id):
                                 "source_original": source_original,
                                 "target_original": target_original,
                                 "sourceHandle": source_handle,
-                                "targetHandle": target_handle
+                                "targetHandle": target_handle,
+                                "edge_id": edge_id,
+                                "style": edge_style
                             }
                             
                             # Si ya hay una condición, la preservamos
