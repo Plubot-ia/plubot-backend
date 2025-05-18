@@ -94,6 +94,15 @@ def create():
 def catch_all(path):
     # No capturar rutas que comiencen con /api
     if path.startswith('api/'):
+        # Verificar si es una ruta de verificación de correo electrónico
+        if 'verify_email' in path:
+            # Obtener la URL base del frontend desde la configuración o usar una predeterminada
+            frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+            # Extraer el token de la ruta
+            token = path.split('/')[-1]
+            # Redirigir al frontend con el token
+            return redirect(f"{frontend_url}/login?message=verified")
+        
         logger.warning(f"Ruta de API no encontrada: {request.method} {path}")
         return jsonify({'status': 'error', 'message': f'Ruta de API no encontrada: {path}'}), 404
     

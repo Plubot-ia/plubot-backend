@@ -76,11 +76,28 @@ def verify_email(token):
             user = session.query(User).filter_by(id=user_id).first()
             if not user:
                 return jsonify({'status': 'error', 'message': 'Usuario no encontrado.'}), 404
+            
+            # Obtener la URL base desde la configuración o construir una relativa
+            frontend_url = os.getenv('FRONTEND_URL', '')
+            
             if user.is_verified:
-                return redirect('https://www.plubot.com/login?message=already_verified')
+                # Si ya está verificado, redirigir con mensaje apropiado
+                if frontend_url:
+                    return redirect(f"{frontend_url}/login?message=already_verified")
+                else:
+                    # URL relativa si no hay frontend_url configurado
+                    return redirect('/login?message=already_verified')
+            
+            # Marcar como verificado
             user.is_verified = True
             session.commit()
-            return redirect('https://www.plubot.com/login?message=verified')
+            
+            # Redirigir al usuario a la página de login con mensaje de éxito
+            if frontend_url:
+                return redirect(f"{frontend_url}/login?message=verified")
+            else:
+                # URL relativa si no hay frontend_url configurado
+                return redirect('/login?message=verified')
     except Exception as e:
         logger.exception(f"Error al verificar correo: {str(e)}")
         return jsonify({'status': 'error', 'message': 'El enlace de verificación es inválido o ha expirado.'}), 400
