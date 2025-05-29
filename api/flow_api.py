@@ -10,6 +10,7 @@ import logging
 import json
 import time
 import uuid
+import traceback
 
 from config.settings import get_session
 from models.plubot import Plubot
@@ -22,6 +23,17 @@ from services.cache_service import cached, invalidate_flow_cache, cache_get, cac
 
 flow_bp = Blueprint('flow', __name__)
 logger = logging.getLogger(__name__)
+
+# Helper para validación JSON
+def is_json_serializable(data):
+    if data is None: # None es JSON null, que es válido
+        return True
+    try:
+        json.dumps(data)
+        return True
+    except (TypeError, OverflowError) as e:
+        logger.warning(f"Data is not JSON serializable: {e}. Data: {str(data)[:200]}") # Loguea el error y parte del dato
+        return False
 
 # Modelo para respaldo de flujos
 class FlowBackup:
@@ -196,49 +208,30 @@ def get_flow(plubot_id):
             
             return jsonify({"status": "success", "data": flow_data}), 200
     except Exception as e:
-        logger.error(f"Error al obtener flujo para plubot {plubot_id}: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-@flow_bp.route('/<int:plubot_id>', methods=['PATCH'])
-@jwt_required()
-@transactional("Error al actualizar flujo")
-@backup_before_operation(create_flow_backup)
-def update_flow(plubot_id):
-    """
-    Actualiza el flujo de un plubot de forma incremental.
-    
-    PATCH /api/flow/{plubot_id}
-    """
-    user_id = get_jwt_identity()
-    data = request.get_json()
-    
-    try:
-        with get_session() as session:
-            # Verificar que el plubot existe y pertenece al usuario
-            plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
-            if not plubot:
-                return jsonify({"status": "error", "message": "Plubot no encontrado o no tienes permisos"}), 404
+        # Capturar el traceback completo
+        tb_str = traceback.format_exc()
+        
+        # Preparar el mensaje de error base
+        log_message = f"Error en get_flow para plubot_id {plubot_id}. Excepción: {str(e)}\nTraceback:\n{tb_str}"
+        
+        # Intentar obtener una representación de flow_data para el log
+        if 'flow_data' in locals():
+            try:
+                # Intentar serializar con json.dumps para ver si da el mismo error o más info
+                # default=str para manejar tipos comunes no serializables como datetime
+                problematic_data_log = json.dumps(flow_data, indent=2, default=str)
+                log_message += f"\n\nIntento de volcado de flow_data (puede estar incompleto o ser la causa del error):\n{problematic_data_log}"
+            except Exception as dump_error:
+                # Si json.dumps también falla, registrar ese error y un repr de flow_data
+                log_message += f"\n\njson.dumps también falló al intentar volcar flow_data: {str(dump_error)}"
+                log_message += f"\nRepresentación de flow_data (repr):\n{repr(flow_data)}"
+        else:
+            log_message += "\n\nflow_data no estaba definido en el momento de la excepción."
             
-            # Verificar si se proporcionó un diff o datos completos
-            diff = data.get('diff')
-            
-            with atomic_transaction(session, f"Error al actualizar flujo para plubot {plubot_id}"):
-                if diff:
-                    # Aplicar cambios incrementales
-                    logger.info(f"Aplicando diff para plubot {plubot_id}: {len(diff.get('nodes_to_create', []))} nodos a crear, {len(diff.get('edges_to_create', []))} aristas a crear")
-                    apply_flow_diff(session, plubot_id, diff)
-                else:
-                    # Compatibilidad con clientes antiguos (envío completo)
-                    logger.info(f"Actualizando flujo completo para plubot {plubot_id}")
-                    update_full_flow(session, plubot_id, data)
-            
-            # Invalidar caché
-            invalidate_flow_cache(plubot_id)
-            
-            return jsonify({"status": "success", "message": "Flujo actualizado correctamente"}), 200
-    except Exception as e:
-        logger.error(f"Error al actualizar flujo para plubot {plubot_id}: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(log_message)
+        
+        # Devolver un mensaje de error genérico al cliente
+        return jsonify({"status": "error", "message": "Error interno del servidor al obtener los datos del flujo."}), 500
 
 @transactional("Error al actualizar flujo completo")
 def update_full_flow(session, plubot_id, data):
@@ -285,11 +278,28 @@ def update_full_flow(session, plubot_id, data):
             existing_node.node_type = node_type
             existing_node.intent = node_type
             existing_node.is_deleted = False
-            existing_node.node_metadata = node.get('metadata', {})
+            
+            node_metadata = node.get('metadata', {})
+            if not is_json_serializable(node_metadata):
+                raise ValueError(f"Node metadata for node ID {node_id} is not JSON serializable.")
+            existing_node.node_metadata = node_metadata
+            
+            node_style = node.get('style', {})
+            if not is_json_serializable(node_style):
+                raise ValueError(f"Node style for node ID {node_id} is not JSON serializable.")
+            existing_node.style = node_style
             
             node_id_map[node_id] = existing_node.id
         else:
             # Crear nuevo nodo
+            node_metadata_new = node.get('metadata', {})
+            if not is_json_serializable(node_metadata_new):
+                raise ValueError(f"Node metadata for new node ID {node_id} is not JSON serializable.")
+            
+            node_style_new = node.get('style', {})
+            if not is_json_serializable(node_style_new):
+                raise ValueError(f"Node style for new node ID {node_id} is not JSON serializable.")
+
             new_node = Flow(
                 chatbot_id=plubot_id,
                 frontend_id=node_id or generate_frontend_id('node'),
@@ -300,13 +310,14 @@ def update_full_flow(session, plubot_id, data):
                 node_type=node_type,
                 position_x=position.get('x', 0),
                 position_y=position.get('y', 0),
-                node_metadata=node.get('metadata', {})
+                node_metadata=node_metadata_new,
+                style=node_style_new
             )
             
             session.add(new_node)
             session.flush()  # Para obtener el ID generado
             
-            node_id_map[node_id or new_node.frontend_id] = new_node.id
+            node_id_map[node_id] = new_node.id
     
     # Guardar nuevas aristas
     for edge in edges:
@@ -334,11 +345,27 @@ def update_full_flow(session, plubot_id, data):
             existing_edge.target_handle = edge.get('targetHandle')
             existing_edge.edge_type = edge.get('type', 'default')
             existing_edge.label = edge.get('label', '')
-            existing_edge.style = edge.get('style', {})
-            existing_edge.edge_metadata = edge.get('metadata', {})
+            
+            edge_style_existing = edge.get('style', {})
+            if not is_json_serializable(edge_style_existing):
+                raise ValueError(f"Edge style for existing edge ID {edge.get('id')} is not JSON serializable.")
+            existing_edge.style = edge_style_existing
+            
+            edge_metadata_existing = edge.get('metadata', {})
+            if not is_json_serializable(edge_metadata_existing):
+                raise ValueError(f"Edge metadata for existing edge ID {edge.get('id')} is not JSON serializable.")
+            existing_edge.edge_metadata = edge_metadata_existing
             existing_edge.is_deleted = False
         else:
             # Crear nueva arista
+            edge_style_new = edge.get('style', {})
+            if not is_json_serializable(edge_style_new):
+                raise ValueError(f"Edge style for new edge ID {edge.get('id')} is not JSON serializable.")
+            
+            edge_metadata_new = edge.get('metadata', {})
+            if not is_json_serializable(edge_metadata_new):
+                raise ValueError(f"Edge metadata for new edge ID {edge.get('id')} is not JSON serializable.")
+
             new_edge = FlowEdge(
                 chatbot_id=plubot_id,
                 frontend_id=edge.get('id') or generate_frontend_id('edge'),
@@ -348,8 +375,8 @@ def update_full_flow(session, plubot_id, data):
                 target_handle=edge.get('targetHandle'),
                 edge_type=edge.get('type', 'default'),
                 label=edge.get('label', ''),
-                style=edge.get('style', {}),
-                edge_metadata=edge.get('metadata', {})
+                style=edge_style_new,
+                edge_metadata=edge_metadata_new
             )
             
             session.add(new_edge)
