@@ -3,7 +3,7 @@ API para la gestión de flujos de Plubots.
 Este módulo proporciona endpoints optimizados para manejar flujos
 con actualizaciones incrementales, caché y transacciones atómicas.
 """
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, request, jsonify, current_app as app # app es necesario para la caché
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from sqlalchemy.orm import joinedload
 import logging
@@ -101,7 +101,6 @@ def create_flow_backup(session, plubot_id):
 
 @flow_bp.route('/<int:plubot_id>', methods=['GET'])
 @jwt_required()
-@cached("flow", 300)  # Caché de 5 minutos
 def get_flow(plubot_id):
     """
     Obtiene el flujo completo de un plubot.
@@ -109,14 +108,21 @@ def get_flow(plubot_id):
     GET /api/flow/{plubot_id}
     """
     user_id = get_jwt_identity()
+
+    # Usar el sistema de caché de services.cache_service
+    # La clave debe ser compatible con invalidate_flow_cache que usa cache_clear_by_prefix(f"flow:{plubot_id}")
+    # get_cache_key(prefix, *args) genera 'prefix:hash_of_args'
+    cache_key = get_cache_key(f"flow:{plubot_id}", "full_details")
     
-    # Verificar si está en caché
-    cache_key = get_cache_key("flow", plubot_id)
-    found, cached_data = cache_get(cache_key)
-    if found:
-        logger.info(f"Flujo recuperado de caché para plubot {plubot_id}")
-        return jsonify({"status": "success", "data": cached_data, "source": "cache"}), 200
-    
+    try:
+        found, cached_flow = cache_get(cache_key)
+        if found:
+            logger.info(f"[GET /api/flow/{plubot_id}] Cache hit for key {cache_key}. Returning cached data from _memory_cache.")
+            return jsonify(status="success", data=cached_flow, message="Flujo recuperado desde cache exitosamente"), 200
+        logger.info(f"[GET /api/flow/{plubot_id}] Cache miss for key {cache_key} in _memory_cache.")
+    except Exception as e:
+        logger.error(f"[GET /api/flow/{plubot_id}] Error accessing _memory_cache for GET: {e}")
+
     try:
         with get_session() as session:
             # Verificar que el plubot existe y pertenece al usuario
@@ -132,6 +138,7 @@ def get_flow(plubot_id):
                 joinedload(Flow.outgoing_edges),
                 joinedload(Flow.incoming_edges)
             ).all()
+            logger.info(f"[GET /api/flow/{plubot_id}] DB query for flows (nodes) returned: {len(flows)} items.")
             
             # Convertir flujos a formato esperado por el frontend
             nodes = []
@@ -140,15 +147,12 @@ def get_flow(plubot_id):
                     'id': flow.frontend_id or str(flow.id),
                     'type': flow.node_type or 'message',
                     'position': {'x': flow.position_x or 0, 'y': flow.position_y or 0},
-                    'data': {
-                        'label': flow.user_message,
-                        'message': flow.bot_response
+                    'data': flow.node_metadata.copy() if flow.node_metadata else {
+                        'label': flow.user_message, # Fallback si node_metadata es None
+                        'message': flow.bot_response # Fallback si node_metadata es None
                     }
                 }
-                
-                # Añadir metadatos si existen
-                if flow.node_metadata:
-                    node['metadata'] = flow.node_metadata
+                # node_metadata ya está incorporado en node['data'], por lo que la asignación a node['metadata'] se elimina.
                 
                 nodes.append(node)
             
@@ -157,6 +161,7 @@ def get_flow(plubot_id):
                 chatbot_id=plubot_id,
                 is_deleted=False
             ).all()
+            logger.info(f"[GET /api/flow/{plubot_id}] DB query for edges returned: {len(edges)} items.")
             
             # Convertir aristas a formato esperado por el frontend
             formatted_edges = []
@@ -165,24 +170,21 @@ def get_flow(plubot_id):
                     # Buscar los nodos correspondientes
                     source_node = next((n for n in flows if n.id == edge.source_flow_id), None)
                     target_node = next((n for n in flows if n.id == edge.target_flow_id), None)
-                    
+
                     if not source_node or not target_node:
-                        logger.warning(f"Arista {edge.id} tiene nodos inválidos: {edge.source_flow_id} -> {edge.target_flow_id}")
+                        logger.warning(f"[GET /api/flow/{plubot_id}] Omitiendo arista {edge.id} debido a que falta el nodo fuente/destino. Source ID: {edge.source_flow_id} (encontrado: {source_node is not None}), Target ID: {edge.target_flow_id} (encontrado: {target_node is not None})")
                         continue
                     
                     formatted_edge = {
-                        'id': edge.frontend_id or str(edge.id),
+                        'id': str(edge.id), # Asegurar ID es string
                         'source': source_node.frontend_id or str(source_node.id),
                         'target': target_node.frontend_id or str(target_node.id),
-                        'type': edge.edge_type or 'default',
                         'sourceHandle': edge.source_handle,
-                        'targetHandle': edge.target_handle
+                        'targetHandle': edge.target_handle,
+                        'type': edge.edge_type or 'default', # Proporcionar un valor predeterminado
+                        'animated': edge.animated if edge.animated is not None else True, # Proporcionar un valor predeterminado
+                        'label': edge.label or '', # Proporcionar un valor predeterminado
                     }
-                    
-                    # Añadir etiqueta si existe
-                    if edge.label:
-                        formatted_edge['label'] = edge.label
-                    
                     # Añadir estilo si existe
                     if edge.style:
                         formatted_edge['style'] = edge.style
@@ -193,19 +195,53 @@ def get_flow(plubot_id):
                     
                     formatted_edges.append(formatted_edge)
                 except Exception as e:
-                    logger.error(f"Error al formatear arista {edge.id}: {e}")
+                    logger.error(f"[GET /api/flow/{plubot_id}] Error al formatear arista {edge.id} (Source: {edge.source_flow_id}, Target: {edge.target_flow_id}): {e}. Traceback: {traceback.format_exc()}")
                     continue
             
             # Datos completos para el frontend
             flow_data = {
                 'nodes': nodes,
                 'edges': formatted_edges,
-                'name': plubot.name
+                'name': plubot.name, # Asegurar que el nombre del Plubot se incluya
             }
             
-            # Guardar en caché
-            cache_set(cache_key, flow_data, 300)  # 5 minutos
+            try:
+                cache_set(cache_key, flow_data, expire_seconds=3600) # Cache por 1 hora en _memory_cache
+                logger.info(f"[GET /api/flow/{plubot_id}] Data set in _memory_cache for key {cache_key}.")
+            except Exception as e:
+                logger.error(f"[GET /api/flow/{plubot_id}] Error setting _memory_cache: {e}")
             
+            if flow_data.get('nodes'):
+                sample_nodes_log = []
+                # Loguear hasta 2 nodos de decisión o los primeros 3 nodos si no hay de decisión
+                decision_nodes_logged = 0
+                general_nodes_logged = 0
+                for i, node_item in enumerate(flow_data['nodes']):
+                    is_decision_node = node_item.get('type') == 'decision'
+                    log_this_node = False
+
+                    if is_decision_node and decision_nodes_logged < 2:
+                        log_this_node = True
+                        decision_nodes_logged += 1
+                    elif not is_decision_node and general_nodes_logged < 3 and decision_nodes_logged == 0: # Si aún no logueamos de decisión, logueamos generales
+                        log_this_node = True
+                        general_nodes_logged += 1
+                    elif general_nodes_logged + decision_nodes_logged < 3: # Asegurar al menos algunos logs si no se cumplen los otros
+                        log_this_node = True
+                        general_nodes_logged +=1 # Contamos como general para el límite total
+                        
+                    if log_this_node:
+                        node_data_keys = list(node_item.get('data', {}).keys()) if node_item.get('data') else 'No data field'
+                        sample_nodes_log.append(f"Node {i} (ID: {node_item.get('id')}, Type: {node_item.get('type')}): Data keys: {node_data_keys}")
+                        if is_decision_node:
+                             sample_nodes_log.append(f"  DecisionNode Data: { {k: v for k, v in node_item.get('data', {}).items() if k in ['label', 'question']} }") # Mostrar label y question
+
+                    if decision_nodes_logged >= 2 and general_nodes_logged >=1: # Limite para no loguear demasiado
+                        if len(flow_data['nodes']) > 3:
+                           sample_nodes_log.append(f"... y {len(flow_data['nodes']) - len(sample_nodes_log)} más nodos.")
+                        break
+                logger.info(f"[GET /api/flow/{plubot_id}] Sample nodes being returned: {sample_nodes_log}")
+            logger.info(f"[GET /api/flow/{plubot_id}] Returning full flow_data summary: nodes_count={len(flow_data['nodes']) if flow_data.get('nodes') else 0}, edges_count={len(flow_data['edges']) if flow_data.get('edges') else 0}, name='{flow_data.get('name')}'")
             return jsonify({"status": "success", "data": flow_data}), 200
     except Exception as e:
         # Capturar el traceback completo
@@ -233,8 +269,72 @@ def get_flow(plubot_id):
         # Devolver un mensaje de error genérico al cliente
         return jsonify({"status": "error", "message": "Error interno del servidor al obtener los datos del flujo."}), 500
 
+
+@flow_bp.route('/<int:plubot_id>', methods=['PATCH'])
+@jwt_required()
+def patch_flow(plubot_id):
+    """
+    Actualiza el flujo de un plubot utilizando el método PATCH.
+    Espera un payload JSON con 'nodes', 'edges', y opcionalmente 'name'.
+    """
+    user_id = get_jwt_identity()
+    data = request.get_json()
+    logger.info(f"[PATCH /api/flow/{plubot_id}] Received raw data: {data}")
+
+    if not data:
+        return jsonify({"status": "error", "message": "Request body must be JSON"}), 400
+
+    flow_nodes = data.get("nodes")
+    logger.info(f"[PATCH /api/flow/{plubot_id}] Extracted: nodes_count={len(flow_nodes) if flow_nodes is not None else 'None'}, edges_count={len(data.get('edges')) if data.get('edges') is not None else 'None'}, name='{data.get('name')}'")
+    flow_edges = data.get("edges")
+    flow_name = data.get("name")  # El nombre es opcional para la actualización
+
+    # Los nodos y aristas son fundamentales para la actualización del flujo
+    if flow_nodes is None or not isinstance(flow_nodes, list) \
+            or flow_edges is None or not isinstance(flow_edges, list):
+        return jsonify({"status": "error", "message": "Payload must contain 'nodes' and 'edges' as lists."}), 400
+
+    flow_data_for_update = {
+        "nodes": flow_nodes,
+        "edges": flow_edges,
+        "name": flow_name
+    }
+
+    try:
+        with get_session() as session:
+            # Verificar que el plubot existe y pertenece al usuario
+            plubot = session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+            if not plubot:
+                return jsonify({"status": "error", "message": "Plubot no encontrado o no tienes permisos"}), 404
+
+            # Usar transacción atómica para la operación de actualización completa
+            with atomic_transaction(session, f"Error al actualizar flujo (PATCH) para plubot {plubot_id}"):
+                # Crear una copia de seguridad antes de la operación principal
+                create_flow_backup(session, plubot_id)
+                
+                # Llamar a la lógica existente para actualizar el flujo
+                update_full_flow(session, plubot_id, flow_data_for_update)
+            
+            # Invalidar la caché después de una actualización exitosa
+            invalidate_flow_cache(plubot_id)
+            
+            logger.info(f"Flujo actualizado correctamente para plubot {plubot_id} por usuario {user_id}")
+            return jsonify({"status": "success", "message": "Flujo actualizado correctamente"}), 200
+            
+    except ValueError as ve:
+        # Errores de validación específicos (ej. datos no serializables JSON desde update_full_flow)
+        logger.error(f"Error de validación al actualizar flujo (PATCH) para plubot {plubot_id}: {ve}")
+        return jsonify({"status": "error", "message": str(ve)}), 400
+    except Exception as e:
+        # Capturar el traceback completo para errores inesperados
+        tb_str = traceback.format_exc()
+        logger.error(f"Error en patch_flow para plubot {plubot_id}: {e}\nTraceback:\n{tb_str}")
+        return jsonify({"status": "error", "message": "Error interno del servidor al actualizar el flujo."}), 500
+
+
 @transactional("Error al actualizar flujo completo")
 def update_full_flow(session, plubot_id, data):
+    logger.info(f"[update_full_flow - plubot_id={plubot_id}] Starting update. Received: nodes_count={len(data.get('nodes', []))}, edges_count={len(data.get('edges', []))}, name='{data.get('name')}'")
     """
     Actualiza el flujo completo de un plubot.
     Esta función es para compatibilidad con clientes antiguos.
@@ -252,16 +352,22 @@ def update_full_flow(session, plubot_id, data):
     # Marcar todos los nodos y aristas como eliminados (soft delete)
     session.query(Flow).filter_by(chatbot_id=plubot_id).update({"is_deleted": True})
     session.query(FlowEdge).filter_by(chatbot_id=plubot_id).update({"is_deleted": True})
+    logger.info(f"[update_full_flow - plubot_id={plubot_id}] Marked existing nodes and edges as deleted.")
     
     # Crear mapa para almacenar la relación entre IDs del frontend y backend
     node_id_map = {}
     
     # Guardar nuevos flujos
-    for node in nodes:
+    for node_idx, node in enumerate(nodes):
+        logger.debug(f"[update_full_flow - plubot_id={plubot_id}] Processing node {node_idx + 1}/{len(nodes)}: ID={node.get('id')}")
         node_id = node.get('id')
         node_type = node.get('type', 'message')
         position = node.get('position', {})
         data = node.get('data', {})
+        
+        # Log data being saved for decision nodes
+        if node.get('type') == 'decision':
+            logger.info(f"[update_full_flow - plubot_id={plubot_id}] Saving DecisionNode ID {node.get('id')} with data: {node.get('data', {})}")
         
         # Verificar si ya existe un nodo con este frontend_id
         existing_node = session.query(Flow).filter_by(
@@ -279,26 +385,35 @@ def update_full_flow(session, plubot_id, data):
             existing_node.intent = node_type
             existing_node.is_deleted = False
             
-            node_metadata = node.get('metadata', {})
+            # Usar node.get('data') como base para node_metadata
+            node_metadata = data.copy()  # 'data' es node.get('data', {}) de la línea 363
+
+            # Añadir width, height, y style si están disponibles en el nodo principal
+            if node.get('width') is not None:
+                node_metadata['width'] = node.get('width')
+            if node.get('height') is not None:
+                node_metadata['height'] = node.get('height')
+            
+            node_style_from_node = node.get('style', {})
+            if node_style_from_node: # Asegurar que el estilo no esté vacío antes de añadirlo
+                node_metadata['style'] = node_style_from_node
+
             if not is_json_serializable(node_metadata):
                 raise ValueError(f"Node metadata for node ID {node_id} is not JSON serializable.")
             existing_node.node_metadata = node_metadata
             
-            node_style = node.get('style', {})
-            if not is_json_serializable(node_style):
-                raise ValueError(f"Node style for node ID {node_id} is not JSON serializable.")
-            existing_node.style = node_style
+            # La asignación a existing_node.style se elimina ya que style ahora es parte de node_metadata
             
             node_id_map[node_id] = existing_node.id
         else:
             # Crear nuevo nodo
-            node_metadata_new = node.get('metadata', {})
+            node_metadata_new = data.copy() # 'data' es node.get('data', {}) de la línea 363
+            node_metadata_new['width'] = node.get('width')
+            node_metadata_new['height'] = node.get('height')
+            node_metadata_new['style'] = node.get('style', {})
+
             if not is_json_serializable(node_metadata_new):
-                raise ValueError(f"Node metadata for new node ID {node_id} is not JSON serializable.")
-            
-            node_style_new = node.get('style', {})
-            if not is_json_serializable(node_style_new):
-                raise ValueError(f"Node style for new node ID {node_id} is not JSON serializable.")
+                raise ValueError(f"Combined node_metadata for new node ID {node_id} (including width, height, style) is not JSON serializable.")
 
             new_node = Flow(
                 chatbot_id=plubot_id,
@@ -310,8 +425,7 @@ def update_full_flow(session, plubot_id, data):
                 node_type=node_type,
                 position_x=position.get('x', 0),
                 position_y=position.get('y', 0),
-                node_metadata=node_metadata_new,
-                style=node_style_new
+                node_metadata=node_metadata_new
             )
             
             session.add(new_node)
@@ -320,7 +434,8 @@ def update_full_flow(session, plubot_id, data):
             node_id_map[node_id] = new_node.id
     
     # Guardar nuevas aristas
-    for edge in edges:
+    for edge_idx, edge in enumerate(edges):
+        logger.debug(f"[update_full_flow - plubot_id={plubot_id}] Processing edge {edge_idx + 1}/{len(edges)}: ID={edge.get('id')}")
         source_id = edge.get('source')
         target_id = edge.get('target')
         
@@ -381,6 +496,7 @@ def update_full_flow(session, plubot_id, data):
             
             session.add(new_edge)
     
+    logger.info(f"[update_full_flow - plubot_id={plubot_id}] Update process completed. Node ID map created with {len(node_id_map)} entries. Processed {len(nodes)} nodes and {len(edges)} edges.")
     return True
 
 @flow_bp.route('/<int:plubot_id>/backup', methods=['GET'])
