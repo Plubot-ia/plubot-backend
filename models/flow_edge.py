@@ -17,9 +17,10 @@ class FlowEdge(Base):
     
     # Campos técnicos para UI
     edge_type = Column(String(50), default="default")
-    frontend_id = Column(String(100), nullable=True, index=True)  # ID usado en el frontend
-    source_handle = Column(String(50), nullable=True)  # Handle de origen
-    target_handle = Column(String(50), nullable=True)  # Handle de destino
+    frontend_id = Column(String(255), nullable=True, index=True)  # ID usado en el frontend
+    source_handle = Column(String(255), nullable=True)  # Handle de origen
+    target_handle = Column(String(255), nullable=True)  # Handle de destino
+    animated = Column(Boolean, default=True, nullable=False)  # Si la arista es animada
     
     # Estilos y metadatos
     style = Column(JSON, nullable=True)  # Estilos como JSON
