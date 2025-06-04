@@ -11,7 +11,6 @@ from .templates import templates_bp
 from .webhook import webhook_bp
 from .contact import contact_bp
 from .subscribe import subscribe_bp
-from .grok import grok_bp
 from .whatsapp import whatsapp_bp
 from .google_auth import google_auth_bp
 
@@ -24,6 +23,5 @@ api_bp.register_blueprint(templates_bp, url_prefix='/templates')
 api_bp.register_blueprint(webhook_bp, url_prefix='/webhook')
 api_bp.register_blueprint(contact_bp, url_prefix='/contact')
 api_bp.register_blueprint(subscribe_bp, url_prefix='/subscribe')
-api_bp.register_blueprint(grok_bp)  # Sin prefijo /grok
 api_bp.register_blueprint(whatsapp_bp, url_prefix='/whatsapp')
 api_bp.register_blueprint(google_auth_bp, url_prefix='/auth')  # Usar el prefijo /auth para las rutas de Google

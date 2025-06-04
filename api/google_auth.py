@@ -61,7 +61,7 @@ def get_google_auth_url():
         auth_url = f"https://accounts.google.com/o/oauth2/auth?response_type=code&client_id={GOOGLE_CLIENT_ID}&redirect_uri={redirect_uri}&scope={scope_string}&state={state}&prompt=select_account"
         
         return jsonify({
-            'status': 'success',
+            'success': True,
             'authUrl': auth_url
         })
     except Exception as e:
@@ -191,7 +191,7 @@ def google_callback():
             
             # Devolver respuesta JSON con el token y la URL de redirección
             return jsonify({
-                'status': 'success',
+                'success': True,
                 'message': 'Autenticación con Google exitosa',
                 'access_token': access_token,
                 'redirect_url': f"{FRONTEND_URL}/auth/google/success?token={access_token}"
@@ -228,7 +228,7 @@ def google_auth_success():
                 
                 # Devolver información del usuario junto con el token
                 return jsonify({
-                    'status': 'success',
+                    'success': True,
                     'access_token': token,
                     'user': {
                         'id': user.id,
