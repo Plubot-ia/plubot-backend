@@ -1,4 +1,5 @@
-from flask import Flask, jsonify, redirect, request
+from flask import Flask, request, jsonify, redirect # Added request, jsonify, redirect
+from api.discord_api import discord_bp  # Added for Plubot Discord integration, jsonify, redirect, request
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, set_access_cookies
 from flask_migrate import Migrate
@@ -14,9 +15,11 @@ from utils.templates import load_initial_templates
 from api import api_bp
 from models import db
 from api.grok import grok_bp
+from api.actions_api import actions_bp # Importar el nuevo blueprint de acciones
 from api.integrations import integrations_bp
 from api.opinion import opinion_bp
 from api.flow_api import flow_bp  # Nuevo blueprint para la API de flujos optimizada
+from api.discord_integrations_api import discord_integrations_bp # For user-managed Discord bot integrations
 
 # Configuración de logging
 setup_logging()
@@ -24,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 # Inicialización de la app
 app = Flask(__name__)
+
+# Register Plubot Discord API blueprint
+app.register_blueprint(discord_bp)
 load_config(app)
 
 # Inicializar extensiones
@@ -31,6 +37,23 @@ db.init_app(app)
 migrate = Migrate(app, db)
 jwt = JWTManager(app)
 mail = Mail(app)
+
+# Import User model for JWT user lookup
+from models.user import User
+
+@jwt.user_lookup_loader
+def user_lookup_callback(_jwt_header, jwt_data):
+    """
+    This callback is called when refreshing a token or when `fresh_jwt_required` or `jwt_required` is used.
+    It will look up the user in the database and verify that the user still exists.
+    """
+    identity = jwt_data["sub"]
+    user = db.session.get(User, identity) # Updated to use Session.get
+    if not user:
+        # You could log this event or raise an exception if a user is not found
+        logger.warning(f"User lookup failed for identity: {identity}. User not found.")
+        return None # Or raise UserNotFoundError() if you have a custom exception
+    return user
 
 # Configuración de CORS
 if app.config.get('ENV') == 'development':
@@ -81,9 +104,11 @@ def handle_auth_error(e):
 # Registro de blueprints
 app.register_blueprint(api_bp, url_prefix='/api')
 app.register_blueprint(grok_bp, url_prefix='/api')
+app.register_blueprint(actions_bp) 
 app.register_blueprint(integrations_bp, url_prefix='/api/integrations')
 app.register_blueprint(opinion_bp, url_prefix='/api/opinion')
 app.register_blueprint(flow_bp, url_prefix='/api/flow')  # Nuevo endpoint optimizado para flujos  # Nuevo registro
+app.register_blueprint(discord_integrations_bp) # Registered with url_prefix in its definition
 
 @app.route('/create', methods=['GET', 'POST'])
 def create():

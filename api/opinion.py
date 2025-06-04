@@ -5,7 +5,7 @@ import logging
 opinion_bp = Blueprint('opinion', __name__)
 logger = logging.getLogger(__name__)
 
-@opinion_bp.route('/opinion', methods=['POST'])
+@opinion_bp.route('/', methods=['POST'])
 def submit_opinion():
     """
     Endpoint para recibir opiniones desde el formulario de TuOpinion.jsx.

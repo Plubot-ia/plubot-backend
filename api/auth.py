@@ -62,7 +62,7 @@ def register():
                 body=f"Hola,\n\nPor favor verifica tu correo haciendo clic en este enlace: {verification_link}\n\nEste enlace expira en 24 horas.\n\nSaludos,\nEl equipo de Plubot"
             )
             mail.send(msg)
-            return jsonify({'status': 'success', 'message': 'Revisa tu correo para verificar tu cuenta.'}), 200
+            return jsonify({'success': True, 'message': 'Revisa tu correo para verificar tu cuenta.'}), 200
     except Exception as e:
         logger.exception(f"Error en /register: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -131,7 +131,7 @@ def login():
                 return jsonify({'status': 'error', 'message': 'Por favor verifica tu correo antes de iniciar sesión.'}), 403
             access_token = create_access_token(identity=str(user.id))
             response = jsonify({
-                'status': 'success',
+                'success': True,
                 'message': 'Inicio de sesión exitoso',
                 'access_token': access_token
             })
@@ -180,7 +180,7 @@ def forgot_password():
             body=f"Hola,\n\nPara restablecer tu contraseña, haz clic en el siguiente enlace: {reset_link}\n\nSi no solicitaste esto, ignora este correo.\n\nSaludos,\nEl equipo de Plubot"
         )
         mail.send(msg)
-        return jsonify({'status': 'success', 'message': 'Se ha enviado un enlace de restablecimiento a tu correo.'}), 200
+        return jsonify({'success': True, 'message': 'Se ha enviado un enlace de restablecimiento a tu correo.'}), 200
 
 @auth_bp.route('/reset_password', methods=['POST', 'OPTIONS'])
 def reset_password():
@@ -215,7 +215,7 @@ def reset_password():
             user.password = hashed_password.decode('utf-8')
             session.commit()
             logger.info(f"Contraseña actualizada para usuario {user.id}")
-            return jsonify({'status': 'success', 'message': 'Contraseña restablecida con éxito.'}), 200
+            return jsonify({'success': True, 'message': 'Contraseña restablecida con éxito.'}), 200
     except ExpiredSignatureError:
         logger.info("Token expirado")
         return jsonify({'status': 'error', 'message': 'El enlace ha expirado.'}), 400
@@ -255,7 +255,7 @@ def change_password():
                 body="Hola,\n\nTu contraseña ha sido cambiada exitosamente.\n\nSi no realizaste este cambio, por favor contáctanos de inmediato.\n\nSaludos,\nEl equipo de Plubot"
             )
             mail.send(msg)
-            return jsonify({'status': 'success', 'message': 'Contraseña cambiada con éxito.'}), 200
+            return jsonify({'success': True, 'message': 'Contraseña cambiada con éxito.'}), 200
     except Exception as e:
         logger.exception(f"Error en /change_password: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
@@ -295,7 +295,7 @@ def get_profile():
                 logger.info(f"Usuario {user_id} no tiene plubots asociados")
 
             return jsonify({
-                'status': 'success',
+                'success': True,
                 'user': {
                     'id': user.id,
                     'email': user.email,
@@ -355,7 +355,7 @@ def update_profile():
 
             session.commit()
             return jsonify({
-                'status': 'success',
+                'success': True,
                 'message': 'Perfil actualizado correctamente',
                 'user': {
                     'profile_picture': user.profile_picture,

@@ -23,6 +23,10 @@ class User(Base):
     bio = Column(Text, nullable=True)
     preferences = Column(JSON, nullable=True)
     
+    # Campos de Discord
+    discord_id = Column(String, unique=True, nullable=True)
+    discord_username = Column(String, nullable=True)
+
     # Campos de gamificación
     level = Column(Integer, default=1)
     plucoins = Column(Integer, default=0)  # Revertido a plucoins
@@ -39,6 +43,7 @@ class User(Base):
     
     # Relaciones
     plubots = relationship('Plubot', backref='user', lazy=True)  # Actualizado: usar Plubot
+    discord_integrations = relationship('DiscordIntegration', order_by='DiscordIntegration.id', back_populates='user', lazy='dynamic')
 
     def __repr__(self):
         return f'<User {self.email}>'
