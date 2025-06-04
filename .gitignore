@@ -3,4 +3,4 @@ instance/.env
 __pycache__/
 *.pyc
 .env
-.env
+plubot.log.2
