@@ -138,6 +138,37 @@ def byte_embajador():
         logger.error(f"Error en /api/byte-embajador: {str(e)}")
         return jsonify({'error': f"Error: {str(e)}"}), 500
 
+# AI NODE ENDPOINT
+@grok_bp.route('/ai-node', methods=['POST'])
+def ai_node():
+    data = request.get_json()
+    prompt = data.get('prompt', '')
+    temperature = data.get('temperature', 0.7)
+    max_tokens = data.get('maxTokens', 150)
+    system_message = data.get('systemMessage', '')
+    
+    if not prompt and not system_message:
+        return jsonify({'error': 'No se proporcionó prompt ni mensaje de sistema'}), 400
+
+    messages = []
+    if system_message:
+        messages.append({
+            "role": "system",
+            "content": system_message
+        })
+    messages.append({
+        "role": "user",
+        "content": prompt
+    })
+
+    try:
+        response = call_grok(messages, max_tokens=max_tokens, temperature=temperature)
+        logger.info(f"Respuesta de Grok para AiNode: {response}")
+        return jsonify({'response': response})
+    except Exception as e:
+        logger.error(f"Error en /api/ai-node: {str(e)}")
+        return jsonify({'error': f"Error: {str(e)}"}), 500
+
 # Funciones auxiliares para caché y análisis de sentimiento
 def analyze_sentiment(text):
     text_lower = text.lower()
