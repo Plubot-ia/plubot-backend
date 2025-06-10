@@ -61,6 +61,39 @@ def ensure_redis_connection(max_attempts=3):
 
 @sleep_and_retry
 @limits(calls=50, period=60)
+def detect_emotion(text_to_analyze):
+    """
+    Analiza el texto para detectar una emoción predominante de una lista predefinida.
+    Devuelve una única cadena de texto con la emoción.
+    """
+    system_prompt = (
+        "Eres una IA experta en detección de emociones. Tu tarea es analizar el texto proporcionado e "
+        "identificar la emoción predominante. Debes elegir una de las siguientes seis emociones: "
+        "'joy', 'sadness', 'anger', 'fear', 'surprise', 'disgust'."
+        "No añadas texto extra, explicaciones ni puntuación. Tu respuesta debe ser una única palabra "
+        "en minúsculas de la lista. Por ejemplo: `sadness`."
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": text_to_analyze}
+    ]
+
+    # Call the existing grok service with a very low max_tokens, as we expect a single word.
+    # A slightly higher temperature might help in ambiguous cases.
+    emotion = call_grok(messages, max_tokens=10, temperature=0.3)
+
+    # Clean up the response to ensure it's just the emotion word
+    valid_emotions = ['joy', 'sadness', 'anger', 'fear', 'surprise', 'disgust']
+    cleaned_emotion = ''.join(e for e in emotion if e.isalnum()).lower()
+
+    if cleaned_emotion in valid_emotions:
+        return cleaned_emotion
+    else:
+        # Fallback in case the model returns something unexpected
+        return 'joy' 
+
+
 def call_grok(messages, max_tokens=150, temperature=0.5):
     if len(messages) > 10:
         messages = [messages[0]] + messages[-9:]

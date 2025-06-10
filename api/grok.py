@@ -1,9 +1,31 @@
 from flask import Blueprint, jsonify, request
-from services.grok_service import call_grok
+from services.grok_service import call_grok, detect_emotion
+from flask_jwt_extended import jwt_required
 import logging
 from utils.knowledge_base import KnowledgeBase
 
 grok_bp = Blueprint('grok', __name__)
+
+@grok_bp.route('/emotion-detect', methods=['POST'])
+@jwt_required()
+def emotion_detect_route():
+    """
+    API endpoint to detect emotion from a given text.
+    """
+    data = request.get_json()
+    text = data.get('text')
+
+    if not text:
+        return jsonify({'error': 'Text for analysis is required.'}), 400
+
+    try:
+        detected_emotion = detect_emotion(text)
+        return jsonify({'emotion': detected_emotion})
+    except Exception as e:
+        return jsonify({'error': 'An error occurred during emotion detection.'}), 500
+
+
+# Blueprint definition was moved to the top of the file to fix a NameError.
 logger = logging.getLogger(__name__)
 kb = KnowledgeBase()  # Instancia global de la base de conocimiento
 
