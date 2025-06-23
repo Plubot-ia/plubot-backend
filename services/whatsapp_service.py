@@ -5,7 +5,7 @@ from flask import current_app
 from threading import Thread
 
 from models import db, WhatsappConnection, Plubot
-from services.flow_executor import FlowExecutor
+from services import flow_executor
 
 class WhatsAppService:
     def __init__(self):
@@ -132,16 +132,8 @@ class WhatsAppService:
 
     def process_flow(self, plubot_id, user_id, message):
         with current_app.app_context():
-            plubot = Plubot.query.get(plubot_id)
-            if not plubot:
-                logging.error(f"No se encontró el Plubot con id {plubot_id}")
-                return
-
-            flow_executor = FlowExecutor(plubot.id, plubot.nodes, plubot.edges)
-            responses = flow_executor.process_message(user_id, message)
-            
-            for response_text in responses:
-                self.send_whatsapp_message(plubot_id, user_id, response_text)
+            # The trigger_flow function now handles the entire logic of the conversation
+            flow_executor.trigger_flow(plubot_id, user_id, message)
 
     def send_whatsapp_message(self, plubot_id, to_number, message_text):
         connection = WhatsappConnection.query.filter_by(plubot_id=plubot_id, status='connected').first()
