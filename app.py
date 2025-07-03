@@ -71,12 +71,36 @@ def user_lookup_callback(_jwt_header: dict[str, Any], jwt_data: dict[str, Any]) 
 
 
 # Configuración de CORS
+# Default to production CORS settings
+production_origins = [
+    "http://localhost:5173",
+    "http://192.168.0.213:5173",
+    "https://www.plubot.com",
+    "https://plubot.com",
+    "https://plubot-frontend.vercel.app",
+    "https://staging.plubot.com",
+]
+
+CORS(
+    app,
+    resources={
+        "/*": {
+            "origins": production_origins,
+            "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": True,
+            "expose_headers": ["Content-Type", "Authorization"],
+        },
+    },
+)
+
+# Override with more permissive settings only if explicitly in development
 if app.config.get("ENV") == "development":
     CORS(
         app,
         resources={
             "/*": {
-                "origins": "*",
+                "origins": "*",  # Allow all origins in development
                 "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
                 "allow_headers": [
                     "Content-Type",
@@ -85,7 +109,6 @@ if app.config.get("ENV") == "development":
                     "Accept",
                 ],
                 "supports_credentials": True,
-                "expose_headers": ["Content-Type", "Authorization"],
             },
         },
     )
@@ -99,28 +122,6 @@ if app.config.get("ENV") == "development":
             request.path,
             dict(request.headers),
         )
-
-else:
-    # Configuración de producción
-    CORS(
-        app,
-        resources={
-            "/*": {
-                "origins": [
-                    "http://localhost:5173",
-                    "http://192.168.0.213:5173",
-                    "https://www.plubot.com",
-                    "https://plubot.com",
-                    "https://plubot-frontend.vercel.app",
-                    "https://staging.plubot.com",
-                ],
-                "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-                "allow_headers": ["Content-Type", "Authorization"],
-                "supports_credentials": True,
-                "expose_headers": ["Content-Type", "Authorization"],
-            },
-        },
-    )
 
 
 # Manejo de errores de autenticación
