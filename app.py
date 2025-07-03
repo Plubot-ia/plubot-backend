@@ -46,6 +46,7 @@ from api.grok import grok_bp
 from api.integrations import integrations_bp
 from api.opinion import opinion_bp
 from api.whatsapp_api import whatsapp_api_bp
+from api.google_auth import google_auth_bp
 from models import db
 from models.user import User
 from utils.templates import load_initial_templates
@@ -151,6 +152,7 @@ app.register_blueprint(opinion_bp, url_prefix="/api/opinion")
 app.register_blueprint(flow_bp, url_prefix="/api/flow")
 app.register_blueprint(discord_integrations_bp)
 app.register_blueprint(whatsapp_api_bp, url_prefix="/api")
+app.register_blueprint(google_auth_bp, url_prefix="/api")
 
 
 @app.route("/create", methods=["GET", "POST"])

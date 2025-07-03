@@ -50,7 +50,7 @@ def get_google_auth_url() -> Response:
         state: str = secrets.token_urlsafe(16)
         session["google_auth_state"] = state
 
-        redirect_uri: str = f"{FRONTEND_URL}/auth/google/callback"
+        redirect_uri: str = f"{os.getenv('API_URL', 'http://localhost:5000')}/api/google/callback"
         logger.info("URL de redirección para Google OAuth: %s", redirect_uri)
 
         scopes: list[str] = ["openid", "email", "profile"]
@@ -129,7 +129,7 @@ def google_callback() -> Response:
     try:
         logger.info("Procesando código de autorización de Google: %s...", code[:10])
 
-        redirect_uri = f"{FRONTEND_URL}/auth/google/callback"
+        redirect_uri = f"{os.getenv('API_URL', 'http://localhost:5000')}/api/google/callback"
         token_url: str = "https://oauth2.googleapis.com/token"  # noqa: S105
         token_data: dict[str, str] = {
             "code": code,
@@ -214,14 +214,10 @@ def google_callback() -> Response:
             access_token: str = create_access_token(identity=str(user.id))
             logger.info("Token JWT creado para usuario: %s", user.id)
 
-            return jsonify(
-                {
-                    "success": True,
-                    "message": "Autenticación con Google exitosa",
-                    "access_token": access_token,
-                    "redirect_url": f"{FRONTEND_URL}/auth/google/success?token={access_token}",
-                }
+            redirect_to_frontend_url = (
+                f"{FRONTEND_URL}/auth/google/callback?token={access_token}"
             )
+            return redirect(redirect_to_frontend_url)
 
     except Exception:
         logger.exception("Error en el proceso de autenticación con Google")
@@ -237,45 +233,4 @@ def google_callback() -> Response:
         )
 
 
-@google_auth_bp.route("/google/success", methods=["POST"])
-def google_auth_success() -> Response:
-    """Endpoint para verificar y procesar el token después de la redirección."""
-    try:
-        token: str | None = request.json.get("token")
-        if not token:
-            return jsonify({"status": "error", "message": "Token no proporcionado"}), 400
 
-        try:
-            user_id: str = decode_token(token)["sub"]
-            with get_session() as session_db:
-                user: User | None = session_db.query(User).filter_by(id=user_id).first()
-                if not user:
-                    return (
-                        jsonify({"status": "error", "message": "Usuario no encontrado"}),
-                        404,
-                    )
-
-                return jsonify(
-                    {
-                        "success": True,
-                        "access_token": token,
-                        "user": {
-                            "id": user.id,
-                            "name": user.name,
-                            "email": user.email,
-                            "profile_picture": user.profile_picture,
-                            "is_verified": user.is_verified,
-                            "role": user.role,
-                        },
-                        "message": "Autenticación con Google exitosa",
-                    }
-                )
-        except Exception:
-            logger.exception("Error al decodificar token")
-            return jsonify({"status": "error", "message": "Token inválido"}), 401
-    except Exception:
-        logger.exception("Error al procesar token de Google")
-        return (
-            jsonify({"status": "error", "message": "Error interno del servidor"}),
-            500,
-        )
