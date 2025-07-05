@@ -75,6 +75,7 @@ def user_lookup_callback(_jwt_header: dict[str, Any], jwt_data: dict[str, Any]) 
 # Default to production CORS settings
 production_origins = [
     "http://localhost:5173",
+    "http://localhost:5174",  # Permitir acceso desde el puerto de desarrollo de Vite
     "http://192.168.0.213:5173",
     "https://www.plubot.com",
     "https://plubot.com",
