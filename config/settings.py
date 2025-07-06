@@ -48,13 +48,7 @@ def load_config(app: "Flask") -> None:
     # Configuraciones de JWT
     app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "super-secret")
     app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(hours=1)
-    app.config["JWT_TOKEN_LOCATION"] = ["cookies", "headers"]
-    app.config["JWT_ACCESS_COOKIE_NAME"] = "access_token"
-    app.config["JWT_COOKIE_CSRF_PROTECT"] = False
-    is_dev = os.getenv("FLASK_ENV", "development") == "development"
-    app.config["JWT_COOKIE_SECURE"] = not is_dev
-    app.config["JWT_COOKIE_SAMESITE"] = "Lax" if is_dev else "None"
-    app.config["JWT_ACCESS_COOKIE_PATH"] = "/"
+    app.config["JWT_TOKEN_LOCATION"] = ["headers"]
 
     # Configuraciones de Flask-Mail
     app.config["MAIL_SERVER"] = os.getenv("MAIL_SERVER")
