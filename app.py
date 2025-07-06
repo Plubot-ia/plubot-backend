@@ -72,48 +72,40 @@ def user_lookup_callback(_jwt_header: dict[str, Any], jwt_data: dict[str, Any]) 
 
 
 # Configuración de CORS
-# Default to production CORS settings
-production_origins = [
-    "http://localhost:5173",
-    "http://localhost:5174",  # Permitir acceso desde el puerto de desarrollo de Vite
-    "http://192.168.0.213:5173",
-    "https://www.plubot.com",
-    "https://plubot.com",
-    "https://plubot-frontend.vercel.app",
-    "https://staging.plubot.com",
-]
+if app.config.get("ENV") == "development":
+    # Configuración permisiva para desarrollo
+    origins = "*"
+    methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+    allow_headers = [
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "Accept",
+    ]
+else:
+    # Configuración estricta para producción
+    origins = [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://192.168.0.213:5173",
+        "https://www.plubot.com",
+        "https://plubot.com",
+        "https://plubot-frontend.vercel.app",
+        "https://staging.plubot.com",
+    ]
+    methods = ["GET", "POST", "OPTIONS", "PUT", "DELETE"]
+    allow_headers = ["Content-Type", "Authorization"]
 
 CORS(
     app,
-    resources={
-        "/*": {
-            "origins": production_origins,
-            "methods": ["GET", "POST", "OPTIONS", "PUT", "DELETE"],
-            "allow_headers": ["Content-Type", "Authorization"],
-            "supports_credentials": True,
-            "expose_headers": ["Content-Type", "Authorization"],
-        },
-    },
+    resources={r"/*": {"origins": origins}},
+    supports_credentials=True,
+    methods=methods,
+    allow_headers=allow_headers,
+    expose_headers=["Content-Type", "Authorization"],
 )
 
-# Override with more permissive settings only if explicitly in development
 if app.config.get("ENV") == "development":
-    CORS(
-        app,
-        resources={
-            "/*": {
-                "origins": "*",  # Allow all origins in development
-                "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-                "allow_headers": [
-                    "Content-Type",
-                    "Authorization",
-                    "X-Requested-With",
-                    "Accept",
-                ],
-                "supports_credentials": True,
-            },
-        },
-    )
 
     @app.before_request
     def log_request_info() -> None:
