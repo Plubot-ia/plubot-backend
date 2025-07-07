@@ -50,7 +50,11 @@ def get_google_auth_url() -> Response:
         state: str = secrets.token_urlsafe(16)
         session["google_auth_state"] = state
 
-        redirect_uri: str = f"{os.getenv('API_URL', 'http://localhost:5000')}/api/google/callback"
+        api_url = os.getenv("API_URL")
+        if not api_url:
+            logger.critical("La variable de entorno API_URL no está configurada.")
+            return jsonify({"status": "error", "message": "Configuración del servidor incompleta."}), 500
+        redirect_uri: str = f"{api_url}/api/google/callback"
         logger.info("URL de redirección para Google OAuth: %s", redirect_uri)
 
         scopes: list[str] = ["openid", "email", "profile"]
@@ -129,7 +133,11 @@ def google_callback() -> Response:
     try:
         logger.info("Procesando código de autorización de Google: %s...", code[:10])
 
-        redirect_uri = f"{os.getenv('API_URL', 'http://localhost:5000')}/api/google/callback"
+        api_url = os.getenv("API_URL")
+        if not api_url:
+            logger.critical("La variable de entorno API_URL no está configurada para el callback.")
+            return jsonify({"status": "error", "message": "Configuración del servidor incompleta."}), 500
+        redirect_uri: str = f"{api_url}/api/google/callback"
         token_url: str = "https://oauth2.googleapis.com/token"  # noqa: S105
         token_data: dict[str, str] = {
             "code": code,

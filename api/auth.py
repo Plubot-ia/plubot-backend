@@ -13,8 +13,6 @@ from flask_jwt_extended import (
     decode_token,
     get_jwt_identity,
     jwt_required,
-    set_access_cookies,
-    unset_jwt_cookies,
 )
 from flask_mail import Mail, Message
 from jwt.exceptions import ExpiredSignatureError
@@ -173,9 +171,16 @@ def login() -> tuple[Response, int]:
 
                 access_token = create_access_token(identity=str(user.id))
                 user_data = {"id": user.id, "name": user.name, "email": user.email}
-                response = jsonify({"success": True, "user": user_data})
-                set_access_cookies(response, access_token)
-                return response, 200
+                return (
+                    jsonify(
+                        {
+                            "success": True,
+                            "user": user_data,
+                            "access_token": access_token,
+                        }
+                    ),
+                    200,
+                )
 
             logger.warning("Intento de login fallido para el email: %s", data.email)
             return jsonify({"status": "error", "message": "Credenciales inválidas"}), 401
@@ -188,9 +193,9 @@ def login() -> tuple[Response, int]:
 @jwt_required()
 def logout() -> tuple[Response, int]:
     """Handle user logout."""
-    response = jsonify({"success": True, "message": "Sesión cerrada"})
-    unset_jwt_cookies(response)
-    return response, 200
+    # The frontend handles token removal from local storage.
+    # The backend doesn't need to do anything for header-based auth.
+    return jsonify({"success": True, "message": "Logout successful"}), 200
 
 @auth_bp.route("/forgot-password", methods=["POST", "OPTIONS"]) 
 def forgot_password() -> tuple[Response, int]:
