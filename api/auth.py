@@ -10,6 +10,7 @@ from flask import Blueprint, Response, jsonify, redirect, request, url_for
 from flask.blueprints import BlueprintSetupState
 from flask_jwt_extended import (
     create_access_token,
+    create_refresh_token,
     decode_token,
     get_jwt_identity,
     jwt_required,
@@ -170,6 +171,7 @@ def login() -> tuple[Response, int]:
                     )
 
                 access_token = create_access_token(identity=str(user.id))
+                refresh_token = create_refresh_token(identity=str(user.id))
                 user_data = {"id": user.id, "name": user.name, "email": user.email}
                 return (
                     jsonify(
@@ -177,6 +179,7 @@ def login() -> tuple[Response, int]:
                             "success": True,
                             "user": user_data,
                             "access_token": access_token,
+                            "refresh_token": refresh_token,
                         }
                     ),
                     200,

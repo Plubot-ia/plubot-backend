@@ -93,7 +93,7 @@ else:
         "https://plubot-frontend.vercel.app",
         "https://staging.plubot.com",
     ]
-    methods = ["GET", "POST", "OPTIONS", "PUT", "DELETE"]
+    methods = ["GET", "POST", "OPTIONS", "PUT", "DELETE", "PATCH"]
     allow_headers = ["Content-Type", "Authorization"]
 
 CORS(

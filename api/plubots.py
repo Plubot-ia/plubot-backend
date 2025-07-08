@@ -654,6 +654,61 @@ def delete_bot(plubot_id: int) -> tuple[Response, int]:
             session.rollback()
             return jsonify({"status": "error", "message": "Error interno del servidor"}), 500
 
+
+@plubots_bp.route("/plubots/<int:plubot_id>/embed", methods=["POST"])
+@jwt_required()
+def create_embeddable_plubot(plubot_id: int) -> Response:
+    """Generates a public ID for a plubot to make it embeddable."""
+    user_id = get_jwt_identity()
+    try:
+        with get_session() as session:
+            plubot = (
+                session.query(Plubot)
+                .filter_by(id=plubot_id, user_id=user_id)
+                .first()
+            )
+            if not plubot:
+                return (
+                    jsonify(
+                        {
+                            "status": "error",
+                            "message": "Plubot no encontrado o no tienes permisos.",
+                        }
+                    ),
+                    404,
+                )
+
+            if not plubot.public_id:
+                plubot.public_id = uuid.uuid4().hex
+                session.add(plubot)
+                session.commit()
+                session.refresh(plubot)
+
+            frontend_url = settings.FRONTEND_URL
+            direct_link = f"{frontend_url}/chat/{plubot.public_id}"
+
+            return (
+                jsonify(
+                    {
+                        "status": "success",
+                        "message": "Plubot preparado para ser embebido.",
+                        "data": {
+                            "publicId": plubot.public_id,
+                            "directLink": direct_link,
+                        },
+                    }
+                ),
+                200,
+            )
+    except Exception as e:
+        logger.exception(
+            "Error al crear la versión embebible del plubot_id=%s: %s", plubot_id, e
+        )
+        return (
+            jsonify({"status": "error", "message": "Error interno del servidor."}),
+            500,
+        )
+
 @plubots_bp.route("/clone/<int:plubot_id>", methods=["POST", "OPTIONS"])
 @jwt_required()
 def clone_bot(plubot_id: int) -> tuple[Response, int]:
@@ -773,64 +828,6 @@ def _serialize_public_edges(
         }
         for edge in edges
     ]
-
-
-@plubots_bp.route("/<int:plubot_id>/embed", methods=["POST"])
-@jwt_required()
-def generate_embed_resources(plubot_id: int) -> tuple[Response, int]:
-    """Generate public resources for embedding a plubot, like a QR code."""
-    user_id = get_jwt_identity()
-    json_data = request.get_json() or {}
-    customization = json_data.get("customization", {})
-
-    with get_session() as session:
-        try:
-            plubot = (
-                session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
-            )
-            if not plubot:
-                return (
-                    jsonify(
-                        {"status": "error", "message": "Plubot no encontrado o no autorizado"}
-                    ),
-                    404,
-                )
-
-            if not plubot.public_id:
-                plubot.public_id = str(uuid.uuid4())
-                logger.info("Generated new public_id for plubot %s", plubot.id)
-
-            if not plubot.is_webchat_enabled:
-                plubot.is_webchat_enabled = True
-
-            session.commit()
-
-            frontend_url = settings.FRONTEND_URL.strip("/")
-            chat_url = f"{frontend_url}/chat/{plubot.public_id}"
-            qr_code_url = (
-                f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={chat_url}"
-            )
-
-            return jsonify(
-                {
-                    "status": "success",
-                    "data": {
-                        "publicId": plubot.public_id,
-                        "qrCodeUrl": qr_code_url,
-                        "customization": customization,
-                    },
-                }
-            )
-
-        except Exception:
-            logger.exception(
-                "Error al generar recursos de embebido para plubot_id=%s", plubot_id
-            )
-            session.rollback()
-            return (
-                jsonify({"status": "error", "message": "Error interno del servidor"}),
-                500,
-            )
 
 
 @plubots_bp.route("/chat/<string:public_id>", methods=["GET"])
