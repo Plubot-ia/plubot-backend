@@ -201,3 +201,7 @@ def configure_cors(app: Flask) -> None:
         allow_headers=allow_headers,
         expose_headers=["Content-Type", "Authorization"],
     )
+
+
+# Create app instance for Gunicorn
+app = create_app()
