@@ -12,7 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from extensions import db
 from models.whatsapp_business import WhatsAppBusiness, WhatsAppMessage, WhatsAppWebhookEvent
-from services.flow_service import FlowService
+# from services.flow_service import FlowService  # TODO: Implementar cuando esté disponible
 
 logger = logging.getLogger(__name__)
 
@@ -319,14 +319,14 @@ class WhatsAppBusinessService:
             
             db.session.commit()
             
-            # Procesar con el motor de flujos
-            if content and message_type == "text":
-                flow_service = FlowService()
-                flow_service.process_whatsapp_message(
-                    plubot_id=whatsapp.plubot_id,
-                    from_number=from_number,
-                    message=content
-                )
+            # TODO: Procesar con el motor de flujos cuando esté disponible
+            # if content and message_type == "text":
+            #     flow_service = FlowService()
+            #     flow_service.process_whatsapp_message(
+            #         plubot_id=whatsapp.plubot_id,
+            #         from_number=from_number,
+            #         message=content
+            #     )
             
             logger.info(f"Mensaje procesado: {message_id} de {from_number}")
             
