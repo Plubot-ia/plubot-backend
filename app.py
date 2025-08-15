@@ -108,7 +108,8 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(opinion_bp, url_prefix="/api/opinion")
     app.register_blueprint(flow_bp, url_prefix="/api/flow")
     app.register_blueprint(discord_integrations_bp)
-    app.register_blueprint(whatsapp_api_bp, url_prefix="/api")
+    # app.register_blueprint(whatsapp_api_bp, url_prefix="/api")  # Old Twilio/Whapi integration
+    app.register_blueprint(whatsapp_business_bp, url_prefix="/api")  # New WhatsApp Business API
 
     # Rutas de conveniencia y catch-all
     @app.route("/create", methods=["GET", "POST"])
