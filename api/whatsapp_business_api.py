@@ -7,6 +7,7 @@ from typing import Any, Dict
 from flask import Blueprint, Response, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from extensions import db
 from models.plubot import Plubot
 from models.whatsapp_business import WhatsAppBusiness
 from services.whatsapp_business_service import WhatsAppBusinessService
@@ -27,12 +28,12 @@ def get_whatsapp_status(plubot_id: int) -> tuple[Response, int]:
         user_id = get_jwt_identity()
         
         # Verificar que el Plubot pertenece al usuario
-        plubot = Plubot.query.filter_by(id=plubot_id, user_id=user_id).first()
+        plubot = db.session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
         if not plubot:
             return jsonify({"status": "error", "message": "Plubot no encontrado"}), 404
         
-        # Buscar cuenta de WhatsApp asociada
-        whatsapp = WhatsAppBusiness.query.filter_by(plubot_id=plubot_id).first()
+        # Obtener información de WhatsApp Business si existe
+        whatsapp = db.session.query(WhatsAppBusiness).filter_by(plubot_id=plubot_id).first()
         
         if not whatsapp:
             return jsonify({
@@ -69,7 +70,7 @@ def connect_whatsapp(plubot_id: int) -> tuple[Response, int]:
         user_id = get_jwt_identity()
         
         # Verificar que el Plubot pertenece al usuario
-        plubot = Plubot.query.filter_by(id=plubot_id, user_id=user_id).first()
+        plubot = db.session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
         if not plubot:
             return jsonify({"status": "error", "message": "Plubot no encontrado"}), 404
         
@@ -122,7 +123,7 @@ def disconnect_whatsapp(plubot_id: int) -> tuple[Response, int]:
         user_id = get_jwt_identity()
         
         # Verificar que el Plubot pertenece al usuario
-        plubot = Plubot.query.filter_by(id=plubot_id, user_id=user_id).first()
+        plubot = db.session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
         if not plubot:
             return jsonify({"status": "error", "message": "Plubot no encontrado"}), 404
         

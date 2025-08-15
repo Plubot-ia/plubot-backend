@@ -3,15 +3,16 @@ Servicio para manejar la integración con WhatsApp Business API
 """
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 import requests
 from flask import Flask, current_app
-from sqlalchemy.exc import SQLAlchemyError
 
 from extensions import db
-from models.whatsapp_business import WhatsAppBusiness, WhatsAppMessage, WhatsAppWebhookEvent
+from models.whatsapp_business import WhatsAppBusiness
+from models.whatsapp_message import WhatsAppMessage
+from models.whatsapp_webhook_event import WhatsAppWebhookEvent
 # from services.flow_service import FlowService  # TODO: Implementar cuando esté disponible
 
 logger = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ class WhatsAppBusinessService:
                 return False
             
             # Guardar o actualizar la información en la base de datos
-            whatsapp = WhatsAppBusiness.query.filter_by(plubot_id=plubot_id).first()
+            whatsapp = db.session.query(WhatsAppBusiness).filter_by(plubot_id=plubot_id).first()
             
             if whatsapp:
                 # Actualizar cuenta existente
@@ -162,7 +163,7 @@ class WhatsAppBusinessService:
     def disconnect(self, plubot_id: int) -> bool:
         """Desconecta WhatsApp Business de un Plubot"""
         try:
-            whatsapp = WhatsAppBusiness.query.filter_by(plubot_id=plubot_id).first()
+            whatsapp = db.session.query(WhatsAppBusiness).filter_by(plubot_id=plubot_id).first()
             
             if not whatsapp:
                 logger.warning(f"No se encontró cuenta de WhatsApp para Plubot {plubot_id}")
@@ -184,7 +185,7 @@ class WhatsAppBusinessService:
     def send_message(self, plubot_id: int, to: str, message: str, message_type: str = "text") -> Optional[str]:
         """Envía un mensaje de WhatsApp"""
         try:
-            whatsapp = WhatsAppBusiness.query.filter_by(plubot_id=plubot_id, is_active=True).first()
+            whatsapp = db.session.query(WhatsAppBusiness).filter_by(plubot_id=plubot_id, is_active=True).first()
             
             if not whatsapp:
                 logger.error(f"No se encontró cuenta activa de WhatsApp para Plubot {plubot_id}")
