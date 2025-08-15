@@ -19,6 +19,7 @@ from api.grok import grok_bp
 from api.integrations import integrations_bp
 from api.opinion import opinion_bp
 from api.whatsapp_api import whatsapp_api_bp
+from api.whatsapp_business_api import whatsapp_business_bp
 from config.settings import load_config
 from models.token_blocklist import TokenBlocklist
 from models.user import User
