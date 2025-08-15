@@ -27,7 +27,8 @@ class WhatsAppBusinessService:
         self.app_id = self.app.config.get("FACEBOOK_APP_ID")
         self.app_secret = self.app.config.get("FACEBOOK_APP_SECRET")
         self.webhook_verify_token = self.app.config.get("WHATSAPP_WEBHOOK_VERIFY_TOKEN")
-        self.redirect_uri = self.app.config.get("WHATSAPP_REDIRECT_URI")
+        # Usar la página de callback del frontend
+        self.redirect_uri = "https://plubot.com/whatsapp-callback.html"
     
     def get_oauth_url(self, plubot_id: int) -> str:
         """Genera la URL de OAuth para conectar WhatsApp Business"""
