@@ -77,6 +77,12 @@ class Settings:
         self.WHATSAPP_API_URL: str | None = os.getenv("WHATSAPP_API_URL")
         self.WHATSAPP_API_KEY: str | None = os.getenv("WHATSAPP_API_KEY")
 
+        # WhatsApp Business API (Official)
+        self.FACEBOOK_APP_ID: str | None = os.getenv("FACEBOOK_APP_ID")
+        self.FACEBOOK_APP_SECRET: str | None = os.getenv("FACEBOOK_APP_SECRET")
+        self.WHATSAPP_WEBHOOK_VERIFY_TOKEN: str | None = os.getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN")
+        self.WHATSAPP_REDIRECT_URI: str | None = os.getenv("WHATSAPP_REDIRECT_URI")
+        
         # Twilio
         self.TWILIO_ACCOUNT_SID: str | None = os.getenv("TWILIO_ACCOUNT_SID")
         self.TWILIO_AUTH_TOKEN: str | None = os.getenv("TWILIO_AUTH_TOKEN")
@@ -145,6 +151,12 @@ def load_config(app: "Flask") -> None:
     app.config["BACKEND_URL"] = settings.BACKEND_URL
     app.config["WHATSAPP_API_URL"] = settings.WHATSAPP_API_URL
     app.config["WHATSAPP_API_KEY"] = settings.WHATSAPP_API_KEY
+    
+    # WhatsApp Business API (Official)
+    app.config["FACEBOOK_APP_ID"] = settings.FACEBOOK_APP_ID
+    app.config["FACEBOOK_APP_SECRET"] = settings.FACEBOOK_APP_SECRET
+    app.config["WHATSAPP_WEBHOOK_VERIFY_TOKEN"] = settings.WHATSAPP_WEBHOOK_VERIFY_TOKEN
+    app.config["WHATSAPP_REDIRECT_URI"] = settings.WHATSAPP_REDIRECT_URI
 
     # Twilio
     app.config["TWILIO_ACCOUNT_SID"] = settings.TWILIO_ACCOUNT_SID

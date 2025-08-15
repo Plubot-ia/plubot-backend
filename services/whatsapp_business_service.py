@@ -27,7 +27,7 @@ class WhatsAppBusinessService:
         self.app = app or current_app
         self.app_id = self.app.config.get("FACEBOOK_APP_ID")
         self.app_secret = self.app.config.get("FACEBOOK_APP_SECRET")
-        self.webhook_verify_token = self.app.config.get("WHATSAPP_WEBHOOK_VERIFY_TOKEN", "plubot_verify_2024")
+        self.webhook_verify_token = self.app.config.get("WHATSAPP_WEBHOOK_VERIFY_TOKEN")
         self.redirect_uri = self.app.config.get("WHATSAPP_REDIRECT_URI")
     
     def get_oauth_url(self, plubot_id: int) -> str:
