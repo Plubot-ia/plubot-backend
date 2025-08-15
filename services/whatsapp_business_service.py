@@ -32,13 +32,24 @@ class WhatsAppBusinessService:
     
     def get_oauth_url(self, plubot_id: int) -> str:
         """Genera la URL de OAuth para conectar WhatsApp Business"""
-        oauth_url = (
-            f"https://www.facebook.com/v18.0/dialog/oauth?"
-            f"client_id={self.app_id}"
-            f"&redirect_uri={self.redirect_uri}"
-            f"&state={plubot_id}"
-            f"&scope=whatsapp_business_management,whatsapp_business_messaging"
-        )
+        import urllib.parse
+        
+        # URL base de Facebook OAuth
+        base_url = "https://www.facebook.com/v18.0/dialog/oauth"
+        
+        # Parámetros de OAuth
+        params = {
+            "client_id": self.app_id,
+            "redirect_uri": self.redirect_uri,
+            "state": str(plubot_id),
+            "response_type": "code",
+            "scope": "whatsapp_business_management,whatsapp_business_messaging,business_management"
+        }
+        
+        # Construir URL con parámetros codificados
+        oauth_url = f"{base_url}?{urllib.parse.urlencode(params)}"
+        logger.info(f"OAuth URL generada para Plubot {plubot_id}: {oauth_url}")
+        
         return oauth_url
     
     def exchange_token(self, code: str, plubot_id: int) -> bool:

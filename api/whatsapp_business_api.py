@@ -37,34 +37,36 @@ def get_whatsapp_status(plubot_id: int) -> tuple[Response, int]:
         if not whatsapp:
             return jsonify({
                 "status": "success",
-                "connected": False,
-                "message": "No hay cuenta de WhatsApp conectada"
+                "data": {
+                    "is_active": False,
+                    "message": "No hay cuenta de WhatsApp conectada"
+                }
             }), 200
         
         # Verificar si el token sigue siendo válido
         service = get_whatsapp_service()
-        is_valid = service.verify_token(whatsapp.access_token)
+        is_valid = service.verify_token(whatsapp.access_token) if whatsapp.access_token else False
         
         return jsonify({
             "status": "success",
-            "connected": whatsapp.is_active and is_valid,
-            "phone_number": whatsapp.phone_number,
-            "business_name": whatsapp.business_name,
-            "waba_id": whatsapp.waba_id
+            "data": {
+                "is_active": whatsapp.is_active and is_valid,
+                "phone_number": whatsapp.phone_number,
+                "business_name": whatsapp.business_name,
+                "waba_id": whatsapp.waba_id
+            }
         }), 200
         
     except Exception as e:
         logger.error(f"Error obteniendo estado de WhatsApp: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@whatsapp_business_bp.route("/wa/connect", methods=["POST"])
+@whatsapp_business_bp.route("/wa/connect/<int:plubot_id>", methods=["POST"])
 @jwt_required()
-def connect_whatsapp() -> tuple[Response, int]:
+def connect_whatsapp(plubot_id: int) -> tuple[Response, int]:
     """Inicia el proceso de conexión con WhatsApp Business"""
     try:
         user_id = get_jwt_identity()
-        data = request.get_json()
-        plubot_id = data.get("plubot_id")
         
         # Verificar que el Plubot pertenece al usuario
         plubot = Plubot.query.filter_by(id=plubot_id, user_id=user_id).first()
@@ -73,11 +75,11 @@ def connect_whatsapp() -> tuple[Response, int]:
         
         # Generar URL de OAuth
         service = get_whatsapp_service()
-        auth_url = service.get_oauth_url(plubot_id)
+        oauth_url = service.get_oauth_url(plubot_id)
         
         return jsonify({
             "status": "success",
-            "auth_url": auth_url
+            "oauth_url": oauth_url
         }), 200
         
     except Exception as e:
@@ -140,13 +142,12 @@ def disconnect_whatsapp(plubot_id: int) -> tuple[Response, int]:
         logger.error(f"Error desconectando WhatsApp: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-@whatsapp_business_bp.route("/wa/send", methods=["POST"])
+@whatsapp_business_bp.route("/wa/send/<int:plubot_id>", methods=["POST"])
 @jwt_required()
-def send_whatsapp_message() -> tuple[Response, int]:
+def send_whatsapp_message(plubot_id: int) -> tuple[Response, int]:
     """Envía un mensaje de WhatsApp"""
     try:
         data = request.get_json()
-        plubot_id = data.get("plubot_id")
         to = data.get("to")
         message = data.get("message")
         
