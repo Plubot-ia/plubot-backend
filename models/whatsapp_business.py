@@ -34,7 +34,6 @@ class WhatsAppBusiness(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relaciones
-    plubot = db.relationship("Plubot", backref="whatsapp_business", uselist=False)
     messages = db.relationship("WhatsAppMessage", backref="whatsapp_account", lazy="dynamic")
     webhook_events = db.relationship("WhatsAppWebhookEvent", backref="whatsapp_account", lazy="dynamic")
     
