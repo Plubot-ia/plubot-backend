@@ -1,0 +1,6 @@
+instance/.env
+*.log
+__pycache__/
+*.pyc
+.env
+plubot.log.2

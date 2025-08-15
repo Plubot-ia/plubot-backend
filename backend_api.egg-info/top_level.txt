@@ -1,0 +1,9 @@
+TESTERS
+api
+config
+instance
+migrations
+models
+services
+utils
+venv

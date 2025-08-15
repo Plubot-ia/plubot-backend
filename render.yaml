@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: plubot-backend
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --worker-class gevent --bind 0.0.0.0:10000 app:app
+    envVars:
+      - key: FLASK_APP
+        value: app.py
+      - key: FLASK_ENV
+        value: production
+      - key: JWT_SECRET_KEY
+        value: your-secret-jwt-key
+      - key: DATABASE_URL
+        fromDatabase:
+          name: plubot-db
+          property: connectionString
+      - key: AWS_ACCESS_KEY_ID
+        value: your-aws-access-key-id
+      - key: AWS_SECRET_ACCESS_KEY
+        value: your-aws-secret-access-key
+      - key: AWS_S3_BUCKET
+        value: plubot-profile-pics
