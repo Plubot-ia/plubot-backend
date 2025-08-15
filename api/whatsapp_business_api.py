@@ -115,6 +115,42 @@ def whatsapp_callback() -> tuple[Response, int]:
         logger.error(f"Error en callback de WhatsApp: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@whatsapp_business_bp.route("/wa/oauth-callback", methods=["POST"])
+def oauth_callback() -> tuple[Response, int]:
+    """Procesa el callback de OAuth de Facebook (sin requerir JWT)"""
+    try:
+        data = request.get_json()
+        code = data.get("code")
+        plubot_id = data.get("plubot_id")
+        
+        if not code or not plubot_id:
+            return jsonify({
+                "success": False,
+                "error": "Código o ID de Plubot faltante"
+            }), 400
+        
+        # Intercambiar código por token
+        service = get_whatsapp_service()
+        result = service.exchange_token(code, plubot_id)
+        
+        if result:
+            return jsonify({
+                "success": True,
+                "message": "WhatsApp Business conectado exitosamente"
+            }), 200
+        else:
+            return jsonify({
+                "success": False,
+                "error": "Error al intercambiar el código por token"
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error en OAuth callback: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
 @whatsapp_business_bp.route("/wa/disconnect/<int:plubot_id>", methods=["POST"])
 @jwt_required()
 def disconnect_whatsapp(plubot_id: int) -> tuple[Response, int]:
