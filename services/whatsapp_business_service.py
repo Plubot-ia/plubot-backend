@@ -10,9 +10,7 @@ import requests
 from flask import Flask, current_app
 
 from extensions import db
-from models.whatsapp_business import WhatsAppBusiness
-from models.whatsapp_message import WhatsAppMessage
-from models.whatsapp_webhook_event import WhatsAppWebhookEvent
+from models.whatsapp_business import WhatsAppBusiness, WhatsAppMessage, WhatsAppWebhookEvent
 # from services.flow_service import FlowService  # TODO: Implementar cuando esté disponible
 
 logger = logging.getLogger(__name__)
