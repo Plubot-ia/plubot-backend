@@ -55,7 +55,7 @@ class WhatsAppBusinessService:
     def exchange_token(self, code: str, plubot_id: int) -> bool:
         """Intercambia el código de autorización por un token de acceso"""
         try:
-            # Intercambiar código por token de acceso largo
+            # Intercambiar código por token
             token_url = f"{self.BASE_URL}/oauth/access_token"
             params = {
                 "client_id": self.app_id,
@@ -65,114 +65,65 @@ class WhatsAppBusinessService:
             }
             
             logger.info(f"Intercambiando código por token para Plubot {plubot_id}")
+            logger.info(f"URL: {token_url}")
+            logger.info(f"Client ID: {self.app_id[:10]}...")
+            logger.info(f"Redirect URI: {self.redirect_uri}")
+            
             response = requests.get(token_url, params=params)
+            
+            logger.info(f"Response status: {response.status_code}")
+            logger.info(f"Response text: {response.text[:500]}")
             
             if response.status_code != 200:
                 logger.error(f"Error obteniendo token: Status {response.status_code}, Response: {response.text}")
                 return False
             
-            token_data = response.json()
-            short_token = token_data.get("access_token")
+            # Facebook puede devolver el token en diferentes formatos
+            try:
+                token_data = response.json()
+                access_token = token_data.get("access_token")
+            except:
+                # Si no es JSON, intentar parsear como query string
+                from urllib.parse import parse_qs
+                parsed = parse_qs(response.text)
+                access_token = parsed.get('access_token', [None])[0]
             
-            if not short_token:
-                logger.error(f"No se recibió access_token en la respuesta: {token_data}")
+            if not access_token:
+                logger.error(f"No se pudo extraer access_token de la respuesta: {response.text}")
                 return False
             
-            # Intercambiar por token de larga duración
-            exchange_url = f"{self.BASE_URL}/oauth/access_token"
-            exchange_params = {
-                "grant_type": "fb_exchange_token",
-                "client_id": self.app_id,
-                "client_secret": self.app_secret,
-                "fb_exchange_token": short_token
-            }
+            logger.info(f"Token obtenido exitosamente para Plubot {plubot_id}")
             
-            exchange_response = requests.get(exchange_url, params=exchange_params)
-            
-            if exchange_response.status_code != 200:
-                logger.error(f"Error obteniendo token de larga duración: {exchange_response.text}")
-                # Usar el token corto si no podemos obtener el largo
-                long_token = short_token
-            else:
-                exchange_data = exchange_response.json()
-                long_token = exchange_data.get("access_token", short_token)
-            
-            # Obtener información del usuario y sus cuentas de WhatsApp Business
-            user_url = f"{self.BASE_URL}/me"
-            user_params = {
-                "fields": "id,name,accounts",
-                "access_token": long_token
-            }
-            
-            user_response = requests.get(user_url, params=user_params)
-            
-            if user_response.status_code != 200:
-                logger.error(f"Error obteniendo información del usuario: {user_response.text}")
-                return False
-            
-            user_data = user_response.json()
-            user_id = user_data.get("id")
-            
-            # Obtener las cuentas de WhatsApp Business
-            waba_url = f"{self.BASE_URL}/{user_id}/owned_whatsapp_business_accounts"
-            waba_params = {
-                "access_token": long_token
-            }
-            
-            waba_response = requests.get(waba_url, params=waba_params)
-            
-            # Si no hay cuentas WABA, guardar con información básica
-            waba_id = "pending"
-            phone_number_id = "pending"
-            phone_number = "pending"
-            business_name = user_data.get("name", "WhatsApp Business")
-            
-            if waba_response.status_code == 200:
-                waba_data = waba_response.json()
-                if waba_data.get("data") and len(waba_data["data"]) > 0:
-                    waba_account = waba_data["data"][0]
-                    waba_id = waba_account.get("id", waba_id)
-                    business_name = waba_account.get("name", business_name)
-                    
-                    # Intentar obtener el número de teléfono
-                    phone_url = f"{self.BASE_URL}/{waba_id}/phone_numbers"
-                    phone_params = {"access_token": long_token}
-                    phone_response = requests.get(phone_url, params=phone_params)
-                    
-                    if phone_response.status_code == 200:
-                        phone_data = phone_response.json()
-                        if phone_data.get("data") and len(phone_data["data"]) > 0:
-                            phone_info = phone_data["data"][0]
-                            phone_number_id = phone_info.get("id", phone_number_id)
-                            phone_number = phone_info.get("display_phone_number", phone_number)
-            
-            # Guardar o actualizar la información en la base de datos
+            # Por ahora, guardar el token básico sin intentar obtener información adicional
+            # que puede requerir permisos especiales
             whatsapp = db.session.query(WhatsAppBusiness).filter_by(plubot_id=plubot_id).first()
             
             if whatsapp:
                 # Actualizar cuenta existente
-                whatsapp.access_token = long_token
-                whatsapp.waba_id = waba_id
-                whatsapp.phone_number_id = phone_number_id
-                whatsapp.phone_number = phone_number
-                whatsapp.business_name = business_name
+                whatsapp.access_token = access_token
+                whatsapp.waba_id = "pending_configuration"
+                whatsapp.phone_number_id = "pending_configuration"
+                whatsapp.phone_number = "pending_configuration"
+                whatsapp.business_name = "WhatsApp Business"
                 whatsapp.is_active = True
                 whatsapp.updated_at = datetime.utcnow()
+                logger.info(f"Actualizando WhatsApp Business existente para Plubot {plubot_id}")
             else:
                 # Crear nueva cuenta
                 whatsapp = WhatsAppBusiness(
                     plubot_id=plubot_id,
-                    access_token=long_token,
-                    waba_id=waba_id,
-                    phone_number_id=phone_number_id,
-                    phone_number=phone_number,
-                    business_name=business_name,
+                    access_token=access_token,
+                    waba_id="pending_configuration",
+                    phone_number_id="pending_configuration",
+                    phone_number="pending_configuration",
+                    business_name="WhatsApp Business",
                     is_active=True
                 )
                 db.session.add(whatsapp)
+                logger.info(f"Creando nuevo WhatsApp Business para Plubot {plubot_id}")
             
             db.session.commit()
-            logger.info(f"WhatsApp Business conectado exitosamente para Plubot {plubot_id}: WABA ID={waba_id}")
+            logger.info(f"WhatsApp Business conectado exitosamente para Plubot {plubot_id}")
             return True
             
         except Exception as e:
