@@ -115,6 +115,19 @@ def whatsapp_callback() -> tuple[Response, int]:
         logger.error(f"Error en callback de WhatsApp: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@whatsapp_business_bp.route("/wa/reload-metadata", methods=["GET"])
+def reload_metadata():
+    """Endpoint temporal para recargar metadata"""
+    try:
+        from extensions import db
+        # Clear all metadata
+        db.metadata.clear()
+        # Re-import models to rebuild metadata
+        from models.whatsapp_business import WhatsAppBusiness, WhatsAppMessage, WhatsAppWebhookEvent
+        return jsonify({"status": "success", "message": "Metadata reloaded"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 @whatsapp_business_bp.route("/wa/oauth-callback", methods=["POST"])
 def oauth_callback() -> tuple[Response, int]:
     """Procesa el callback de OAuth de Facebook/WhatsApp"""
