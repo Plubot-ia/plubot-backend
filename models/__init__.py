@@ -29,8 +29,7 @@ from .template import Template
 from .token_blocklist import TokenBlocklist
 from .user import User
 from .whatsapp_connection import WhatsAppConnection
-from .whatsapp_business import WhatsAppBusiness
-from .whatsapp_webhook_event import WhatsAppWebhookEvent
+from .whatsapp_business import WhatsAppBusiness, WhatsAppMessage, WhatsAppWebhookEvent
 
 __all__ = [
     "Base",
@@ -48,6 +47,7 @@ __all__ = [
     "User",
     "WhatsAppConnection",
     "WhatsAppBusiness",
+    "WhatsAppMessage",
     "WhatsAppWebhookEvent",
     "db",
 ]
