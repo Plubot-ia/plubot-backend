@@ -7,7 +7,7 @@ import certifi
 from extensions import db, jwt, limiter, mail, migrate
 
 # Force restart - Clear SQLAlchemy metadata cache
-# Deploy timestamp: 2024-08-16 14:28:00
+# Deploy timestamp: 2024-08-16 15:00:00 - FORCE METADATA CLEAR
 from flask import Flask, Response, jsonify, redirect, request
 from flask_cors import CORS
 from flask_jwt_extended.exceptions import NoAuthorizationError
@@ -31,12 +31,17 @@ from utils.templates import load_initial_templates
 
 
 def create_app() -> Flask:
-    # Importar todos los modelos para que SQLAlchemy los reconozca.
-    # Esto es crucial para que Alembic funcione correctamente.
-    from models import __all__  # noqa: F401
     """Crea y configura una instancia de la aplicación Flask (Application Factory)."""
     setup_logging()
     logger = logging.getLogger(__name__)
+    
+    # Clear SQLAlchemy metadata to force reload of models
+    from extensions import db
+    db.metadata.clear()
+    
+    # Import all models AFTER clearing metadata
+    from models import __all__  # noqa: F401
+    from models.whatsapp_business import WhatsAppBusiness, WhatsAppMessage, WhatsAppWebhookEvent  # noqa: F401
 
     app = Flask(__name__, instance_relative_config=True)
     load_config(app)
