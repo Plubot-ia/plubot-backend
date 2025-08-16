@@ -35,11 +35,7 @@ def create_app() -> Flask:
     setup_logging()
     logger = logging.getLogger(__name__)
     
-    # Clear SQLAlchemy metadata to force reload of models
-    from extensions import db
-    db.metadata.clear()
-    
-    # Import all models AFTER clearing metadata
+    # Import all models to register them with SQLAlchemy
     from models import __all__  # noqa: F401
     from models.whatsapp_business import WhatsAppBusiness, WhatsAppMessage, WhatsAppWebhookEvent  # noqa: F401
 
