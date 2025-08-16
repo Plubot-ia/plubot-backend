@@ -10,6 +10,7 @@ from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
+# Force metadata refresh for WhatsApp models - 2024-08-16 14:26:00
 migrate = Migrate()
 jwt = JWTManager()
 mail = Mail()
