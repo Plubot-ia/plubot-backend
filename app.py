@@ -6,8 +6,8 @@ from typing import Any
 import certifi
 from extensions import db, jwt, limiter, mail, migrate
 
-# Force restart - fixed WhatsApp model imports
-# Deploy timestamp: 2024-08-16 03:13:00
+# Force restart - WhatsApp foreign key fix in model
+# Deploy timestamp: 2024-08-16 14:25:00
 from flask import Flask, Response, jsonify, redirect, request
 from flask_cors import CORS
 from flask_jwt_extended.exceptions import NoAuthorizationError

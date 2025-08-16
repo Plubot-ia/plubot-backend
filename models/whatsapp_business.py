@@ -13,6 +13,7 @@ class WhatsAppBusiness(db.Model):
     __tablename__ = "whatsapp_business"
     
     id = db.Column(db.Integer, primary_key=True)
+    # Fixed foreign key reference - must point to plubots table (plural)
     plubot_id = db.Column(db.Integer, db.ForeignKey("plubots.id"), nullable=False, unique=True)
     
     # Información de la cuenta de WhatsApp Business
