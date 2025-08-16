@@ -13,7 +13,7 @@ class WhatsAppBusiness(db.Model):
     __tablename__ = "whatsapp_business"
     
     id = db.Column(db.Integer, primary_key=True)
-    plubot_id = db.Column(db.Integer, db.ForeignKey("plubots.id"), nullable=False, unique=True)
+    plubot_id = db.Column(db.Integer, db.ForeignKey("plubot.id"), nullable=False, unique=True)
     
     # Información de la cuenta de WhatsApp Business
     waba_id = db.Column(db.String(100), nullable=False)  # WhatsApp Business Account ID
