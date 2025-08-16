@@ -30,7 +30,6 @@ from .token_blocklist import TokenBlocklist
 from .user import User
 from .whatsapp_connection import WhatsAppConnection
 from .whatsapp_business import WhatsAppBusiness
-from .whatsapp_message import WhatsAppMessage
 from .whatsapp_webhook_event import WhatsAppWebhookEvent
 
 __all__ = [
@@ -49,7 +48,6 @@ __all__ = [
     "User",
     "WhatsAppConnection",
     "WhatsAppBusiness",
-    "WhatsAppMessage",
     "WhatsAppWebhookEvent",
     "db",
 ]
