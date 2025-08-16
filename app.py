@@ -6,8 +6,8 @@ from typing import Any
 import certifi
 from extensions import db, jwt, limiter, mail, migrate
 
-# Force restart - remove this comment after deploy
-# Deploy timestamp: 2024-08-16 02:37:00
+# Force restart with model imports
+# Deploy timestamp: 2024-08-16 02:42:00
 from flask import Flask, Response, jsonify, redirect, request
 from flask_cors import CORS
 from flask_jwt_extended.exceptions import NoAuthorizationError
