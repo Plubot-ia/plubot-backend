@@ -117,39 +117,46 @@ def whatsapp_callback() -> tuple[Response, int]:
 
 @whatsapp_business_bp.route("/wa/oauth-callback", methods=["POST"])
 def oauth_callback() -> tuple[Response, int]:
-    """Procesa el callback de OAuth de Facebook (sin requerir JWT)"""
+    """Procesa el callback de OAuth de Facebook/WhatsApp"""
     try:
         data = request.get_json()
-        code = data.get("code")
-        plubot_id = data.get("plubot_id")
         
-        if not code or not plubot_id:
+        if not data:
+            logger.error("No se recibió data en el callback")
+            return jsonify({"error": "No data received"}), 400
+            
+        code = data.get('code')
+        plubot_id = data.get('plubot_id')
+        error = data.get('error')
+        
+        # Si Facebook devolvió un error
+        if error:
+            error_description = data.get('error_description', 'Unknown error')
+            logger.error(f"OAuth error from Facebook: {error} - {error_description}")
             return jsonify({
-                "success": False,
-                "error": "Código o ID de Plubot faltante"
+                "error": f"Facebook OAuth error: {error_description}"
             }), 400
         
-        # Intercambiar código por token
-        service = get_whatsapp_service()
-        result = service.exchange_token(code, plubot_id)
+        if not code or not plubot_id:
+            logger.error(f"Datos faltantes - code: {bool(code)}, plubot_id: {plubot_id}")
+            return jsonify({"error": "Missing code or plubot_id"}), 400
         
-        if result:
-            return jsonify({
-                "success": True,
-                "message": "WhatsApp Business conectado exitosamente"
-            }), 200
+        logger.info(f"Procesando OAuth callback para Plubot {plubot_id}")
+        
+        # Intercambiar código por token
+        service = WhatsAppBusinessService()
+        success = service.exchange_token(code, plubot_id)
+        
+        if success:
+            logger.info(f"Token intercambiado exitosamente para Plubot {plubot_id}")
+            return jsonify({"message": "WhatsApp Business connected successfully"}), 200
         else:
-            return jsonify({
-                "success": False,
-                "error": "Error al intercambiar el código por token"
-            }), 500
+            logger.error(f"Fallo al intercambiar token para Plubot {plubot_id}")
+            return jsonify({"error": "Failed to exchange token"}), 500
             
     except Exception as e:
-        logger.error(f"Error en OAuth callback: {str(e)}")
-        return jsonify({
-            "success": False,
-            "error": str(e)
-        }), 500
+        logger.error(f"Error en OAuth callback: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 @whatsapp_business_bp.route("/wa/disconnect/<int:plubot_id>", methods=["POST"])
 @jwt_required()
