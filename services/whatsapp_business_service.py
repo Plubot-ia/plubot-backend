@@ -109,18 +109,29 @@ class WhatsAppBusinessService:
                 whatsapp.updated_at = datetime.utcnow()
                 logger.info(f"Actualizando WhatsApp Business existente para Plubot {plubot_id}")
             else:
-                # Crear nueva cuenta
-                whatsapp = WhatsAppBusiness(
-                    plubot_id=plubot_id,
-                    access_token=access_token,
-                    waba_id="pending_configuration",
-                    phone_number_id="pending_configuration",
-                    phone_number="pending_configuration",
-                    business_name="WhatsApp Business",
-                    is_active=True
-                )
-                db.session.add(whatsapp)
-                logger.info(f"Creando nuevo WhatsApp Business para Plubot {plubot_id}")
+                # Usar SQL directo para evitar problemas de metadata
+                from sqlalchemy import text
+                from datetime import datetime
+                
+                sql = text("""
+                    INSERT INTO whatsapp_business 
+                    (plubot_id, access_token, waba_id, phone_number_id, phone_number, business_name, is_active, created_at, updated_at)
+                    VALUES 
+                    (:plubot_id, :access_token, :waba_id, :phone_number_id, :phone_number, :business_name, :is_active, :created_at, :updated_at)
+                """)
+                
+                db.session.execute(sql, {
+                    'plubot_id': plubot_id,
+                    'access_token': access_token,
+                    'waba_id': 'pending_configuration',
+                    'phone_number_id': 'pending_configuration',
+                    'phone_number': 'pending_configuration',
+                    'business_name': 'WhatsApp Business',
+                    'is_active': True,
+                    'created_at': datetime.utcnow(),
+                    'updated_at': datetime.utcnow()
+                })
+                logger.info(f"Creando nuevo WhatsApp Business para Plubot {plubot_id} usando SQL directo")
             
             db.session.commit()
             logger.info(f"WhatsApp Business conectado exitosamente para Plubot {plubot_id}")
