@@ -94,17 +94,73 @@ class WhatsAppBusinessService:
             
             logger.info(f"Token obtenido exitosamente para Plubot {plubot_id}")
             
-            # Por ahora, guardar el token básico sin intentar obtener información adicional
-            # que puede requerir permisos especiales
+            # Obtener información del negocio de WhatsApp
+            waba_id = None
+            phone_number_id = None
+            phone_number = None
+            business_name = "WhatsApp Business"
+            
+            try:
+                # Obtener información del usuario/negocio
+                me_url = f"https://graph.facebook.com/v18.0/me"
+                me_response = requests.get(me_url, params={"access_token": access_token})
+                
+                if me_response.status_code == 200:
+                    me_data = me_response.json()
+                    logger.info(f"Información del usuario: {me_data}")
+                    
+                    # Obtener las cuentas de WhatsApp Business
+                    accounts_url = f"https://graph.facebook.com/v18.0/me/accounts"
+                    accounts_response = requests.get(accounts_url, params={
+                        "access_token": access_token,
+                        "fields": "whatsapp_business_account"
+                    })
+                    
+                    if accounts_response.status_code == 200:
+                        accounts_data = accounts_response.json()
+                        logger.info(f"Cuentas obtenidas: {accounts_data}")
+                        
+                        # Buscar la primera cuenta con WhatsApp Business
+                        for account in accounts_data.get('data', []):
+                            if 'whatsapp_business_account' in account:
+                                waba_data = account['whatsapp_business_account']
+                                waba_id = waba_data.get('id')
+                                business_name = waba_data.get('name', 'WhatsApp Business')
+                                
+                                # Obtener números de teléfono
+                                if waba_id:
+                                    phones_url = f"https://graph.facebook.com/v18.0/{waba_id}/phone_numbers"
+                                    phones_response = requests.get(phones_url, params={"access_token": access_token})
+                                    
+                                    if phones_response.status_code == 200:
+                                        phones_data = phones_response.json()
+                                        logger.info(f"Números obtenidos: {phones_data}")
+                                        
+                                        if phones_data.get('data'):
+                                            first_phone = phones_data['data'][0]
+                                            phone_number_id = first_phone.get('id')
+                                            phone_number = first_phone.get('display_phone_number', first_phone.get('verified_name'))
+                                break
+            except Exception as e:
+                logger.warning(f"No se pudo obtener información completa de WhatsApp Business: {str(e)}")
+            
+            # Si no se obtuvieron los datos, usar valores por defecto
+            if not waba_id:
+                waba_id = "pending_configuration"
+            if not phone_number_id:
+                phone_number_id = "pending_configuration"
+            if not phone_number:
+                phone_number = "pending_configuration"
+            
             whatsapp = db.session.query(WhatsAppBusiness).filter_by(plubot_id=plubot_id).first()
             
             if whatsapp:
                 # Actualizar cuenta existente
                 whatsapp.access_token = access_token
-                whatsapp.waba_id = "pending_configuration"
-                whatsapp.phone_number_id = "pending_configuration"
-                whatsapp.phone_number = "pending_configuration"
-                whatsapp.business_name = "WhatsApp Business"
+                whatsapp.waba_id = waba_id
+                whatsapp.phone_number_id = phone_number_id
+                whatsapp.phone_number = phone_number
+                whatsapp.business_name = business_name
                 whatsapp.is_active = True
                 whatsapp.updated_at = datetime.utcnow()
                 logger.info(f"Actualizando WhatsApp Business existente para Plubot {plubot_id}")
@@ -123,10 +179,10 @@ class WhatsAppBusinessService:
                 db.session.execute(sql, {
                     'plubot_id': plubot_id,
                     'access_token': access_token,
-                    'waba_id': 'pending_configuration',
-                    'phone_number_id': 'pending_configuration',
-                    'phone_number': 'pending_configuration',
-                    'business_name': 'WhatsApp Business',
+                    'waba_id': waba_id,
+                    'phone_number_id': phone_number_id,
+                    'phone_number': phone_number,
+                    'business_name': business_name,
                     'is_active': True,
                     'is_connected': True,
                     'connection_status': 'connected',
@@ -193,6 +249,11 @@ class WhatsAppBusinessService:
             
             if not whatsapp:
                 logger.error(f"No se encontró cuenta activa de WhatsApp para Plubot {plubot_id}")
+                return None
+            
+            # Verificar que tenemos la configuración necesaria
+            if not whatsapp.phone_number_id or whatsapp.phone_number_id == "pending_configuration":
+                logger.error(f"WhatsApp no está completamente configurado para Plubot {plubot_id}")
                 return None
             
             # Construir el mensaje según el tipo
