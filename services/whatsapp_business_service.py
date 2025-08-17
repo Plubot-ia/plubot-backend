@@ -115,9 +115,9 @@ class WhatsAppBusinessService:
                 
                 sql = text("""
                     INSERT INTO whatsapp_business 
-                    (plubot_id, access_token, waba_id, phone_number_id, phone_number, business_name, is_active, is_connected, created_at, updated_at)
+                    (plubot_id, access_token, waba_id, phone_number_id, phone_number, business_name, is_active, is_connected, connection_status, created_at, updated_at)
                     VALUES 
-                    (:plubot_id, :access_token, :waba_id, :phone_number_id, :phone_number, :business_name, :is_active, :is_connected, :created_at, :updated_at)
+                    (:plubot_id, :access_token, :waba_id, :phone_number_id, :phone_number, :business_name, :is_active, :is_connected, :connection_status, :created_at, :updated_at)
                 """)
                 
                 db.session.execute(sql, {
@@ -129,6 +129,7 @@ class WhatsAppBusinessService:
                     'business_name': 'WhatsApp Business',
                     'is_active': True,
                     'is_connected': True,
+                    'connection_status': 'connected',
                     'created_at': datetime.utcnow(),
                     'updated_at': datetime.utcnow()
                 })
