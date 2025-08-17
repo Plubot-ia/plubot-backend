@@ -210,4 +210,5 @@ def configure_cors(app: Flask) -> None:
 
 
 # Create app instance for Gunicorn
+# Force restart - 2024-08-17 01:05:00
 app = create_app()
