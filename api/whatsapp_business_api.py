@@ -2,6 +2,7 @@
 API endpoints para la integración con WhatsApp Business API
 """
 import logging
+from datetime import datetime
 from typing import Any, Dict
 
 from flask import Blueprint, Response, jsonify, request
@@ -158,6 +159,53 @@ def oauth_callback() -> tuple[Response, int]:
     except Exception as e:
         logger.error(f"Error en OAuth callback: {str(e)}", exc_info=True)
         return jsonify({"error": str(e)}), 500
+
+@whatsapp_business_bp.route("/wa/configure/<int:plubot_id>", methods=["POST"])
+@jwt_required()
+def configure_whatsapp(plubot_id: int) -> tuple[Response, int]:
+    """Configura manualmente los IDs de WhatsApp Business"""
+    try:
+        user_id = get_jwt_identity()
+        data = request.get_json()
+        
+        # Verificar que el Plubot pertenece al usuario
+        plubot = db.session.query(Plubot).filter_by(id=plubot_id, user_id=user_id).first()
+        if not plubot:
+            return jsonify({"status": "error", "message": "Plubot no encontrado"}), 404
+        
+        # Obtener la conexión de WhatsApp
+        whatsapp = db.session.query(WhatsAppBusiness).filter_by(plubot_id=plubot_id).first()
+        if not whatsapp:
+            return jsonify({"status": "error", "message": "No hay conexión de WhatsApp"}), 404
+        
+        # Actualizar los campos proporcionados
+        if 'phone_number_id' in data:
+            whatsapp.phone_number_id = data['phone_number_id']
+        if 'waba_id' in data:
+            whatsapp.waba_id = data['waba_id']
+        if 'phone_number' in data:
+            whatsapp.phone_number = data['phone_number']
+        if 'business_name' in data:
+            whatsapp.business_name = data['business_name']
+        
+        whatsapp.updated_at = datetime.utcnow()
+        db.session.commit()
+        
+        return jsonify({
+            "status": "success",
+            "message": "Configuración actualizada exitosamente",
+            "data": {
+                "phone_number_id": whatsapp.phone_number_id,
+                "waba_id": whatsapp.waba_id,
+                "phone_number": whatsapp.phone_number,
+                "business_name": whatsapp.business_name
+            }
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error configurando WhatsApp: {str(e)}")
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @whatsapp_business_bp.route("/wa/disconnect/<int:plubot_id>", methods=["POST"])
 @jwt_required()

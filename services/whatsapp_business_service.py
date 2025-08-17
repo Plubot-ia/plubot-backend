@@ -101,6 +101,17 @@ class WhatsAppBusinessService:
             business_name = "WhatsApp Business"
             
             try:
+                # Primero intentar obtener los WhatsApp Business Accounts directamente
+                waba_url = f"https://graph.facebook.com/v18.0/debug_token"
+                debug_response = requests.get(waba_url, params={
+                    "input_token": access_token,
+                    "access_token": f"{self.app_id}|{self.app_secret}"
+                })
+                
+                if debug_response.status_code == 200:
+                    debug_data = debug_response.json()
+                    logger.info(f"Token debug info: {debug_data}")
+                
                 # Obtener información del usuario/negocio
                 me_url = f"https://graph.facebook.com/v18.0/me"
                 me_response = requests.get(me_url, params={"access_token": access_token})
@@ -109,12 +120,40 @@ class WhatsAppBusinessService:
                     me_data = me_response.json()
                     logger.info(f"Información del usuario: {me_data}")
                     
-                    # Obtener las cuentas de WhatsApp Business
-                    accounts_url = f"https://graph.facebook.com/v18.0/me/accounts"
-                    accounts_response = requests.get(accounts_url, params={
-                        "access_token": access_token,
-                        "fields": "whatsapp_business_account"
-                    })
+                    # Intentar obtener WhatsApp Business Accounts directamente
+                    waba_list_url = f"https://graph.facebook.com/v18.0/{me_data.get('id', 'me')}/owned_whatsapp_business_accounts"
+                    waba_response = requests.get(waba_list_url, params={"access_token": access_token})
+                    
+                    if waba_response.status_code == 200:
+                        waba_data = waba_response.json()
+                        logger.info(f"WhatsApp Business Accounts: {waba_data}")
+                        
+                        if waba_data.get('data'):
+                            first_waba = waba_data['data'][0]
+                            waba_id = first_waba.get('id')
+                            business_name = first_waba.get('name', 'WhatsApp Business')
+                            
+                            # Obtener números de teléfono
+                            if waba_id:
+                                phones_url = f"https://graph.facebook.com/v18.0/{waba_id}/phone_numbers"
+                                phones_response = requests.get(phones_url, params={"access_token": access_token})
+                                
+                                if phones_response.status_code == 200:
+                                    phones_data = phones_response.json()
+                                    logger.info(f"Números obtenidos: {phones_data}")
+                                    
+                                    if phones_data.get('data'):
+                                        first_phone = phones_data['data'][0]
+                                        phone_number_id = first_phone.get('id')
+                                        phone_number = first_phone.get('display_phone_number', first_phone.get('verified_name'))
+                    
+                    # Si no funcionó, intentar con accounts
+                    if not waba_id:
+                        accounts_url = f"https://graph.facebook.com/v18.0/me/accounts"
+                        accounts_response = requests.get(accounts_url, params={
+                            "access_token": access_token,
+                            "fields": "whatsapp_business_account"
+                        })
                     
                     if accounts_response.status_code == 200:
                         accounts_data = accounts_response.json()
@@ -220,6 +259,58 @@ class WhatsAppBusinessService:
             logger.error(f"Error verificando token: {str(e)}")
             return False
     
+    def update_whatsapp_info(self, plubot_id: int) -> bool:
+        """Intenta actualizar la información de WhatsApp Business desde el token"""
+        try:
+            whatsapp = db.session.query(WhatsAppBusiness).filter_by(plubot_id=plubot_id).first()
+            if not whatsapp or not whatsapp.access_token:
+                return False
+            
+            access_token = whatsapp.access_token
+            
+            # Intentar obtener información actualizada
+            try:
+                # Obtener WhatsApp Business Accounts
+                waba_url = f"https://graph.facebook.com/v18.0/me"
+                response = requests.get(waba_url, params={"access_token": access_token})
+                
+                if response.status_code == 200:
+                    user_data = response.json()
+                    user_id = user_data.get('id')
+                    
+                    # Intentar obtener WABA directamente
+                    waba_list_url = f"https://graph.facebook.com/v18.0/{user_id}/owned_whatsapp_business_accounts"
+                    waba_response = requests.get(waba_list_url, params={"access_token": access_token})
+                    
+                    if waba_response.status_code == 200:
+                        waba_data = waba_response.json()
+                        if waba_data.get('data'):
+                            first_waba = waba_data['data'][0]
+                            whatsapp.waba_id = first_waba.get('id')
+                            whatsapp.business_name = first_waba.get('name', 'WhatsApp Business')
+                            
+                            # Obtener números
+                            if whatsapp.waba_id:
+                                phones_url = f"https://graph.facebook.com/v18.0/{whatsapp.waba_id}/phone_numbers"
+                                phones_response = requests.get(phones_url, params={"access_token": access_token})
+                                
+                                if phones_response.status_code == 200:
+                                    phones_data = phones_response.json()
+                                    if phones_data.get('data'):
+                                        first_phone = phones_data['data'][0]
+                                        whatsapp.phone_number_id = first_phone.get('id')
+                                        whatsapp.phone_number = first_phone.get('display_phone_number')
+                                        whatsapp.updated_at = datetime.utcnow()
+                                        db.session.commit()
+                                        return True
+            except Exception as e:
+                logger.error(f"Error actualizando información de WhatsApp: {str(e)}")
+            
+            return False
+        except Exception as e:
+            logger.error(f"Error en update_whatsapp_info: {str(e)}")
+            return False
+    
     def disconnect(self, plubot_id: int) -> bool:
         """Desconecta WhatsApp Business de un Plubot"""
         try:
@@ -254,7 +345,16 @@ class WhatsAppBusinessService:
             # Verificar que tenemos la configuración necesaria
             if not whatsapp.phone_number_id or whatsapp.phone_number_id == "pending_configuration":
                 logger.error(f"WhatsApp no está completamente configurado para Plubot {plubot_id}")
-                return None
+                logger.error(f"phone_number_id: {whatsapp.phone_number_id}, waba_id: {whatsapp.waba_id}")
+                # Intentar usar el token para obtener la información faltante
+                if whatsapp.access_token:
+                    self.update_whatsapp_info(plubot_id)
+                    # Recargar la información
+                    db.session.refresh(whatsapp)
+                    if not whatsapp.phone_number_id or whatsapp.phone_number_id == "pending_configuration":
+                        return None
+                else:
+                    return None
             
             # Construir el mensaje según el tipo
             if message_type == "text":
