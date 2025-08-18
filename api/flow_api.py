@@ -211,15 +211,23 @@ def get_flow(plubot_id: int) -> Response:
                         "animated": edge.animated is not None and edge.animated,
                         "label": edge.label or "",
                     }
-                    
+
                     # DEBUG: Log aristas de MessageNode específicamente
-                    if (source_node.node_type == 'MessageNode' and formatted_edge["sourceHandle"] == "output") or \
-                       (target_node.node_type == 'MessageNode' and formatted_edge["targetHandle"] == "input"):
-                        logger.info(f"🔍 [MessageNode Edge] ID: {formatted_edge['id']}, "
-                                  f"Source: {formatted_edge['source']} ({source_node.node_type}), "
-                                  f"Target: {formatted_edge['target']} ({target_node.node_type}), "
-                                  f"SourceHandle: {formatted_edge['sourceHandle']}, "
-                                  f"TargetHandle: {formatted_edge['targetHandle']}")
+                    if ((source_node.node_type == "MessageNode" and
+                         formatted_edge["sourceHandle"] == "output") or
+                        (target_node.node_type == "MessageNode" and
+                         formatted_edge["targetHandle"] == "input")):
+                        logger.info(
+                            "🔍 [MessageNode Edge] ID: %s, Source: %s (%s), Target: %s (%s), "
+                            "SourceHandle: %s, TargetHandle: %s",
+                            formatted_edge["id"],
+                            formatted_edge["source"],
+                            source_node.node_type,
+                            formatted_edge["target"],
+                            target_node.node_type,
+                            formatted_edge["sourceHandle"],
+                            formatted_edge["targetHandle"]
+                        )
                     if edge.style:
                         formatted_edge["style"] = edge.style
                     if edge.edge_metadata:
@@ -274,7 +282,14 @@ def patch_flow(plubot_id: int) -> Response:
     """
     user_id = get_jwt_identity()
     data = request.get_json()
-    logger.info("[PATCH /api/flow/%s] Received raw data: %s", plubot_id, data)
+    
+    # Log más detallado para depuración
+    logger.info(
+        "[PATCH /api/flow/%s] Usuario %s guardando flujo con %s nodos y %s edges",
+        plubot_id, user_id, 
+        len(data.get('nodes', [])) if data else 0,
+        len(data.get('edges', [])) if data else 0
+    )
 
     if not data or not isinstance(data, dict):
         return jsonify({"status": "error", "message": "Payload inválido"}), 400
@@ -314,18 +329,23 @@ def patch_flow(plubot_id: int) -> Response:
             log_msg = f"Error al actualizar flujo (PATCH) para plubot {plubot_id}"
             with atomic_transaction(session, log_msg):
                 # Crear una copia de seguridad antes de la operación principal
-                create_flow_backup(session, plubot_id)
+                backup_id = create_flow_backup(session, plubot_id)
+                logger.info("Backup creado con ID: %s", backup_id)
 
                 # Llamar a la lógica existente para actualizar el flujo
                 update_full_flow(session, plubot_id, flow_data_for_update)
+                
+                logger.info("Transacción completada exitosamente para plubot %s", plubot_id)
 
             # Invalidar la caché después de una actualización exitosa
             invalidate_flow_cache(plubot_id)
 
             logger.info(
-                "Flujo actualizado para plubot %s por usuario %s",
+                "✅ Flujo actualizado exitosamente para plubot %s por usuario %s (nodes: %s, edges: %s)",
                 plubot_id,
                 user_id,
+                len(flow_nodes),
+                len(flow_edges)
             )
             return jsonify({"status": "success", "message": "Flujo actualizado correctamente"}), 200
 
@@ -352,8 +372,32 @@ def _sync_nodes(
     session: Session, plubot_id: int, nodes_data: list, node_map: dict
 ) -> None:
     """Sincroniza los nodos del flujo y actualiza el node_map con los nuevos nodos."""
-    frontend_ids_in_payload = {n.get("id") for n in nodes_data}
-
+    frontend_ids_in_payload = {node["id"] for node in nodes_data}  # Usar set para búsqueda O(1)
+    
+    logger.info(
+        "[_sync_nodes] Sincronizando nodos. En payload: %s, En DB: %s",
+        len(frontend_ids_in_payload), len(node_map)
+    )
+    
+    # Primero, marcar nodos para eliminar (los que no están en el payload)
+    nodes_to_delete = []
+    for frontend_id, node in list(node_map.items()):  # Usar list() para evitar modificar durante iteración
+        if frontend_id not in frontend_ids_in_payload:
+            nodes_to_delete.append((frontend_id, node))
+    
+    logger.info("[_sync_nodes] Nodos a eliminar: %s", len(nodes_to_delete))
+    
+    # Eliminar nodos marcados
+    for frontend_id, node in nodes_to_delete:
+        logger.debug("Eliminando nodo: %s (tipo: %s)", frontend_id, node.node_type)
+        session.delete(node)
+        del node_map[frontend_id]  # Actualizar el node_map
+    
+    # Forzar flush para asegurar eliminación
+    if nodes_to_delete:
+        session.flush()
+    
+    # Ahora procesar los nodos del payload
     for node_data in nodes_data:
         frontend_id = node_data.get("id")
         if not frontend_id:
@@ -365,6 +409,7 @@ def _sync_nodes(
         existing_node = node_map.get(frontend_id)
 
         if existing_node:
+            # Actualizar nodo existente
             existing_node.node_type = node_type
             existing_node.position_x = position.get("x")
             existing_node.position_y = position.get("y")
@@ -380,6 +425,7 @@ def _sync_nodes(
             )
             session.add(existing_node)
         else:
+            # Crear nuevo nodo
             new_node = Flow(
                 chatbot_id=plubot_id,
                 frontend_id=frontend_id,
@@ -392,22 +438,14 @@ def _sync_nodes(
                 position=node_data_field.get("position", 0),
             )
             session.add(new_node)
-            session.flush()
+            session.flush()  # Asegurar que el nodo obtiene un ID
             node_map[frontend_id] = new_node
-
-    nodes_to_delete = [
-        node for f_id, node in node_map.items() if f_id not in frontend_ids_in_payload
-    ]
-    for node in nodes_to_delete:
-        session.delete(node)
 
 def _sync_edges(
     session: Session, plubot_id: int, edges_data: list, node_map: dict
 ) -> None:
-    """Sincroniza las aristas usando un node_map (frontend_id -> nodo) actualizado."""
-    existing_edges = session.query(FlowEdge).filter_by(chatbot_id=plubot_id).all()
-    edge_map = {edge.frontend_id: edge for edge in existing_edges if edge.frontend_id}
-    frontend_ids_in_payload = {e.get("id") for e in edges_data}
+    """Crea las aristas nuevas. Las existentes ya fueron eliminadas en update_full_flow."""
+    logger.info("[_sync_edges] Creando %s aristas nuevas", len(edges_data))
 
     for edge_data in edges_data:
         frontend_id = edge_data.get("id")
@@ -427,66 +465,53 @@ def _sync_edges(
 
         source_db_id = node_map[source_id].id
         target_db_id = node_map[target_id].id
-        
+
         # Normalizar handles: usar 'output' y 'input' como valores por defecto
         # en lugar de cadenas vacías para mantener consistencia
         source_handle = edge_data.get("sourceHandle")
         if not source_handle or source_handle == "":
             source_handle = "output"
-        
-        target_handle = edge_data.get("targetHandle") 
+
+        target_handle = edge_data.get("targetHandle")
         if not target_handle or target_handle == "":
             target_handle = "input"
 
         # DEBUG: Log aristas de MessageNode en guardado
         source_node = node_map[source_id]
         target_node = node_map[target_id]
-        if (source_node.node_type == 'MessageNode' and source_handle == "output") or \
-           (target_node.node_type == 'MessageNode' and target_handle == "input"):
-            logger.info(f"💾 [SAVING MessageNode Edge] ID: {frontend_id}, "
-                      f"Source: {source_id} ({source_node.node_type}), "
-                      f"Target: {target_id} ({target_node.node_type}), "
-                      f"SourceHandle: {source_handle}, TargetHandle: {target_handle}")
-        
-        existing_edge = edge_map.get(frontend_id)
-        if existing_edge:
-            existing_edge.source_flow_id = source_db_id
-            existing_edge.target_flow_id = target_db_id
-            existing_edge.source_handle = source_handle
-            existing_edge.target_handle = target_handle
-            existing_edge.edge_type = edge_data.get("type", "default")
-            existing_edge.label = edge_data.get("label")
-            existing_edge.edge_metadata = edge_data.get("metadata")
-            session.add(existing_edge)
-        else:
-            new_edge = FlowEdge(
-                chatbot_id=plubot_id,
-                frontend_id=frontend_id,
-                source_flow_id=source_db_id,
-                target_flow_id=target_db_id,
-                source_handle=source_handle,
-                target_handle=target_handle,
-                edge_type=edge_data.get("type", "default"),
-                label=edge_data.get("label"),
-                edge_metadata=edge_data.get("metadata"),
+        if ((source_node.node_type == "MessageNode" and source_handle == "output") or
+            (target_node.node_type == "MessageNode" and target_handle == "input")):
+            logger.info(
+                "💾 [SAVING MessageNode Edge] ID: %s, Source: %s (%s), Target: %s (%s), "
+                "SourceHandle: %s, TargetHandle: %s",
+                frontend_id,
+                source_id,
+                source_node.node_type,
+                target_id,
+                target_node.node_type,
+                source_handle,
+                target_handle
             )
-            session.add(new_edge)
-            
-            # DEBUG: Log nueva arista de MessageNode
-            if (source_node.node_type == 'MessageNode' and source_handle == "output") or \
-               (target_node.node_type == 'MessageNode' and target_handle == "input"):
-                logger.info(f"➕ [NEW MessageNode Edge] ID: {frontend_id}, "
-                          f"Source: {source_id} ({source_node.node_type}), "
-                          f"Target: {target_id} ({target_node.node_type}), "
-                          f"SourceHandle: {source_handle}, TargetHandle: {target_handle}")
 
-    edges_to_delete = [
-        edge for f_id, edge in edge_map.items() if f_id not in frontend_ids_in_payload
-    ]
-    for edge in edges_to_delete:
-        session.delete(edge)
+        # Crear nueva arista (todas son nuevas porque eliminamos las existentes)
+        new_edge = FlowEdge(
+            chatbot_id=plubot_id,
+            frontend_id=frontend_id,
+            source_flow_id=source_db_id,
+            target_flow_id=target_db_id,
+            source_handle=source_handle,
+            target_handle=target_handle,
+            edge_type=edge_data.get("type", "default"),
+            label=edge_data.get("label"),
+            edge_metadata=edge_data.get("metadata"),
+        )
+        session.add(new_edge)
 
-@transactional("Error al actualizar flujo completo")
+        # DEBUG: Log nueva arista de MessageNode
+        if (source_node.node_type == "MessageNode" and source_handle == "output") or \
+           (target_node.node_type == "MessageNode" and target_handle == "input"):
+            logger.info("+ Agregando nodo %s a la cola", source_db_id)
+
 def update_full_flow(
     session: Session,
     plubot_id: int,
@@ -502,16 +527,44 @@ def update_full_flow(
         "Received: nodes_count=%s, edges_count=%s, name='%s'",
         plubot_id, len(nodes_data), len(edges_data), name
     )
+    
+    # Permitir guardar flujos vacíos (usuario eliminó todos los nodos intencionalmente)
+    if len(nodes_data) == 0:
+        logger.warning(
+            "[update_full_flow - plubot_id=%s] Saving EMPTY flow (0 nodes). "
+            "User intentionally cleared all nodes.",
+            plubot_id
+        )
 
     _update_plubot_name_if_provided(session, plubot_id, name)
 
-    # El `node_map` (frontend_id -> nodo) es la única fuente de verdad.
-    # Se pasa y se actualiza en `_sync_nodes`, y luego se usa en `_sync_edges`.
+    # IMPORTANTE: Primero eliminar TODAS las aristas existentes
+    # para evitar referencias a nodos que serán eliminados
+    existing_edges = session.query(FlowEdge).filter_by(chatbot_id=plubot_id).all()
+    for edge in existing_edges:
+        session.delete(edge)
+    session.flush()
+    logger.info("[update_full_flow] Eliminadas %s aristas existentes", len(existing_edges))
+    
+    # Ahora obtener y procesar los nodos
     existing_nodes = session.query(Flow).filter_by(chatbot_id=plubot_id).all()
     node_map = {node.frontend_id: node for node in existing_nodes if node.frontend_id}
+    logger.info("[update_full_flow] Encontrados %s nodos existentes en DB", len(node_map))
 
+    # Sincronizar nodos (eliminar los que no están, actualizar/crear los que sí)
     _sync_nodes(session, plubot_id, nodes_data, node_map)
+    
+    # Recrear las aristas con los nodos actualizados
     _sync_edges(session, plubot_id, edges_data, node_map)
+    
+    # Log final state
+    final_nodes_count = session.query(Flow).filter_by(chatbot_id=plubot_id).count()
+    final_edges_count = session.query(FlowEdge).filter_by(chatbot_id=plubot_id).count()
+    logger.info(
+        "[update_full_flow - plubot_id=%s] Update completed. "
+        "Final state: nodes_count=%s, edges_count=%s",
+        plubot_id, final_nodes_count, final_edges_count
+    )
 
     return True
 

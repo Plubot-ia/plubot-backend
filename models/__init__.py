@@ -28,8 +28,8 @@ from .refresh_token import RefreshToken
 from .template import Template
 from .token_blocklist import TokenBlocklist
 from .user import User
-from .whatsapp_connection import WhatsAppConnection
 from .whatsapp_business import WhatsAppBusiness, WhatsAppMessage, WhatsAppWebhookEvent
+from .whatsapp_connection import WhatsAppConnection
 
 __all__ = [
     "Base",

@@ -21,7 +21,6 @@ from api.flow_api import flow_bp
 from api.grok import grok_bp
 from api.integrations import integrations_bp
 from api.opinion import opinion_bp
-from api.whatsapp_api import whatsapp_api_bp
 from api.whatsapp_business_api import whatsapp_business_bp
 from config.settings import load_config
 from models.token_blocklist import TokenBlocklist
@@ -34,10 +33,14 @@ def create_app() -> Flask:
     """Crea y configura una instancia de la aplicación Flask (Application Factory)."""
     setup_logging()
     logger = logging.getLogger(__name__)
-    
+
     # Import all models to register them with SQLAlchemy
     from models import __all__  # noqa: F401
-    from models.whatsapp_business import WhatsAppBusiness, WhatsAppMessage, WhatsAppWebhookEvent  # noqa: F401
+    from models.whatsapp_business import (  # noqa: F401
+        WhatsAppBusiness,
+        WhatsAppMessage,
+        WhatsAppWebhookEvent,
+    )
 
     app = Flask(__name__, instance_relative_config=True)
     load_config(app)
@@ -113,7 +116,6 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(opinion_bp, url_prefix="/api/opinion")
     app.register_blueprint(flow_bp, url_prefix="/api/flow")
     app.register_blueprint(discord_integrations_bp)
-    # app.register_blueprint(whatsapp_api_bp, url_prefix="/api")  # Old Twilio/Whapi integration
     app.register_blueprint(whatsapp_business_bp, url_prefix="/api")  # New WhatsApp Business API
 
     # Rutas de conveniencia y catch-all

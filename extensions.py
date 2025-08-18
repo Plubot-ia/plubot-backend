@@ -1,8 +1,6 @@
+"""Extensiones de Flask centralizadas."""
 from __future__ import annotations
 
-"""
-Extensiones de Flask centralizadas
-"""
 import os
 
 from flask_cors import CORS
