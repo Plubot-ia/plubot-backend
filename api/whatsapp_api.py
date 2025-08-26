@@ -20,8 +20,8 @@ whatsapp_api_bp = Blueprint("whatsapp_api", __name__)
 logger = logging.getLogger(__name__)
 
 # WhatsApp microservice URL
-WHATSAPP_SERVICE_URL = os.getenv("WHATSAPP_SERVICE_URL", "http://localhost:3001")
-WHATSAPP_API_KEY = os.getenv("PYTHON_API_KEY", "internal-api-key")
+WHATSAPP_SERVICE_URL = os.getenv("WHATSAPP_API_URL", "http://localhost:3001")
+WHATSAPP_API_KEY = os.getenv("WHATSAPP_API_KEY", "internal-api-key")
 
 
 @whatsapp_api_bp.route("/whatsapp/connect", methods=["POST"])
