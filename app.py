@@ -21,6 +21,7 @@ from api.flow_api import flow_bp
 from api.grok import grok_bp
 from api.integrations import integrations_bp
 from api.opinion import opinion_bp
+from api.whatsapp_api import whatsapp_api_bp
 from api.whatsapp_business_api import whatsapp_business_bp
 from config.settings import load_config
 from models.token_blocklist import TokenBlocklist
@@ -116,6 +117,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(opinion_bp, url_prefix="/api/opinion")
     app.register_blueprint(flow_bp, url_prefix="/api/flow")
     app.register_blueprint(discord_integrations_bp)
+    app.register_blueprint(whatsapp_api_bp, url_prefix="/api")  # WhatsApp Web.js API
     app.register_blueprint(whatsapp_business_bp, url_prefix="/api")  # New WhatsApp Business API
 
     # Rutas de conveniencia y catch-all
@@ -192,6 +194,7 @@ def configure_cors(app: Flask) -> None:
         origins = [
             "http://localhost:5173",
             "http://localhost:5174",
+            "http://localhost:5175",
             "http://192.168.0.213:5173",
             "https://www.plubot.com",
             "https://plubot.com",

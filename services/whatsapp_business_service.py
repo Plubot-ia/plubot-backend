@@ -75,7 +75,7 @@ class WhatsAppBusinessService:
                 "access_token": f"{self.app_id}|{self.app_secret}"
             }
             debug_response = requests.get(debug_url, params=debug_params, timeout=30)
-            
+
             if debug_response.status_code == 200:
                 debug_data = debug_response.json()
                 if debug_data.get("data", {}).get("is_valid"):
@@ -88,14 +88,14 @@ class WhatsAppBusinessService:
                             params={"access_token": access_token},
                             timeout=30
                         )
-                        
+
                         if wabas_response.status_code == 200:
                             wabas_data = wabas_response.json()
                             if wabas_data.get("data"):
                                 first_waba = wabas_data["data"][0]
                                 waba_id = first_waba.get("id")
                                 business_name = first_waba.get("name", "WhatsApp Business")
-                                
+
                                 # Obtener phone numbers
                                 phones_url = f"{self.BASE_URL}/{waba_id}/phone_numbers"
                                 phones_response = requests.get(
@@ -103,7 +103,7 @@ class WhatsAppBusinessService:
                                     params={"access_token": access_token},
                                     timeout=30
                                 )
-                                
+
                                 if phones_response.status_code == 200:
                                     phones_data = phones_response.json()
                                     if phones_data.get("data"):
@@ -112,7 +112,7 @@ class WhatsAppBusinessService:
                                         phone_number = first_phone.get("display_phone_number")
         except (ValueError, KeyError, TypeError):
             logger.exception("Error obteniendo información de WABA")
-            
+
         return waba_id, phone_number_id, phone_number, business_name
 
     def exchange_token(self, code: str, plubot_id: int) -> bool:
@@ -153,8 +153,10 @@ class WhatsAppBusinessService:
             logger.info("Procesando webhook para Plubot %s", plubot_id)
 
             # Obtener información del negocio de WhatsApp
-            waba_id, phone_number_id, phone_number, business_name = self._get_waba_info(access_token)
-            
+            waba_id, phone_number_id, phone_number, business_name = self._get_waba_info(
+                access_token
+            )
+
             # Si no se obtuvieron los datos, usar valores por defecto
             if not waba_id:
                 waba_id = "pending_configuration"
@@ -208,7 +210,7 @@ class WhatsAppBusinessService:
     def verify_token(self, access_token: str) -> bool:
         """Verifica si un token de acceso es válido."""
         try:
-            debug_url = f"{self.BASE_URL}/debug_token"
+            debug_url = f"{self.graph_url}/debug_token"
             params = {
                 "input_token": access_token,
                 "access_token": f"{self.app_id}|{self.app_secret}"
@@ -220,15 +222,12 @@ class WhatsAppBusinessService:
                 if data.get("is_valid"):
                     logger.info("Token válido para WhatsApp Business")
                     return True
-                else:
-                    logger.warning("Token inválido para WhatsApp Business")
-                    return False
-            else:
-                logger.error("Error verificando token: Status %s", response.status_code)
+                logger.warning("Token inválido para WhatsApp Business")
                 return False
-
-        except (ValueError, KeyError, TypeError):
-            logger.exception("Error verificando token")
+        except requests.exceptions.RequestException:
+            logger.exception("Error verificando token de WhatsApp Business")
+            return False
+        else:
             return False
 
     def disconnect(self, plubot_id: int) -> bool:
@@ -355,13 +354,13 @@ class WhatsAppBusinessService:
                 db.session.commit()
                 logger.info("Mensaje enviado y guardado exitosamente")
                 return message_id
-            else:
-                logger.error("Error enviando mensaje: %s", result)
-                return None
 
         except (ValueError, KeyError, TypeError):
             logger.exception("Error enviando mensaje")
             db.session.rollback()
+            return None
+        else:
+            logger.error("Error enviando mensaje: %s", response.text)
             return None
 
     def verify_webhook(self, mode: str, token: str, challenge: str) -> str | None:
@@ -369,7 +368,6 @@ class WhatsAppBusinessService:
         if mode == "subscribe" and token == self.webhook_verify_token:
             logger.info("Webhook verificado exitosamente")
             return challenge
-        
         logger.warning("Verificación de webhook con token incorrecto: %s", token)
         return None
 

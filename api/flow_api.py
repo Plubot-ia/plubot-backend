@@ -282,13 +282,13 @@ def patch_flow(plubot_id: int) -> Response:
     """
     user_id = get_jwt_identity()
     data = request.get_json()
-    
+
     # Log más detallado para depuración
     logger.info(
         "[PATCH /api/flow/%s] Usuario %s guardando flujo con %s nodos y %s edges",
-        plubot_id, user_id, 
-        len(data.get('nodes', [])) if data else 0,
-        len(data.get('edges', [])) if data else 0
+        plubot_id, user_id,
+        len(data.get("nodes", [])) if data else 0,
+        len(data.get("edges", [])) if data else 0
     )
 
     if not data or not isinstance(data, dict):
@@ -334,14 +334,15 @@ def patch_flow(plubot_id: int) -> Response:
 
                 # Llamar a la lógica existente para actualizar el flujo
                 update_full_flow(session, plubot_id, flow_data_for_update)
-                
+
                 logger.info("Transacción completada exitosamente para plubot %s", plubot_id)
 
             # Invalidar la caché después de una actualización exitosa
             invalidate_flow_cache(plubot_id)
 
             logger.info(
-                "✅ Flujo actualizado exitosamente para plubot %s por usuario %s (nodes: %s, edges: %s)",
+                "✅ Flujo actualizado exitosamente para plubot %s por usuario %s "
+                "(nodes: %s, edges: %s)",
                 plubot_id,
                 user_id,
                 len(flow_nodes),
@@ -373,30 +374,31 @@ def _sync_nodes(
 ) -> None:
     """Sincroniza los nodos del flujo y actualiza el node_map con los nuevos nodos."""
     frontend_ids_in_payload = {node["id"] for node in nodes_data}  # Usar set para búsqueda O(1)
-    
+
     logger.info(
         "[_sync_nodes] Sincronizando nodos. En payload: %s, En DB: %s",
         len(frontend_ids_in_payload), len(node_map)
     )
-    
+
     # Primero, marcar nodos para eliminar (los que no están en el payload)
     nodes_to_delete = []
-    for frontend_id, node in list(node_map.items()):  # Usar list() para evitar modificar durante iteración
+    # Usar list() para evitar modificar durante iteración
+    for frontend_id, node in list(node_map.items()):
         if frontend_id not in frontend_ids_in_payload:
             nodes_to_delete.append((frontend_id, node))
-    
+
     logger.info("[_sync_nodes] Nodos a eliminar: %s", len(nodes_to_delete))
-    
+
     # Eliminar nodos marcados
     for frontend_id, node in nodes_to_delete:
         logger.debug("Eliminando nodo: %s (tipo: %s)", frontend_id, node.node_type)
         session.delete(node)
         del node_map[frontend_id]  # Actualizar el node_map
-    
+
     # Forzar flush para asegurar eliminación
     if nodes_to_delete:
         session.flush()
-    
+
     # Ahora procesar los nodos del payload
     for node_data in nodes_data:
         frontend_id = node_data.get("id")
@@ -527,7 +529,7 @@ def update_full_flow(
         "Received: nodes_count=%s, edges_count=%s, name='%s'",
         plubot_id, len(nodes_data), len(edges_data), name
     )
-    
+
     # Permitir guardar flujos vacíos (usuario eliminó todos los nodos intencionalmente)
     if len(nodes_data) == 0:
         logger.warning(
@@ -545,7 +547,7 @@ def update_full_flow(
         session.delete(edge)
     session.flush()
     logger.info("[update_full_flow] Eliminadas %s aristas existentes", len(existing_edges))
-    
+
     # Ahora obtener y procesar los nodos
     existing_nodes = session.query(Flow).filter_by(chatbot_id=plubot_id).all()
     node_map = {node.frontend_id: node for node in existing_nodes if node.frontend_id}
@@ -553,10 +555,10 @@ def update_full_flow(
 
     # Sincronizar nodos (eliminar los que no están, actualizar/crear los que sí)
     _sync_nodes(session, plubot_id, nodes_data, node_map)
-    
+
     # Recrear las aristas con los nodos actualizados
     _sync_edges(session, plubot_id, edges_data, node_map)
-    
+
     # Log final state
     final_nodes_count = session.query(Flow).filter_by(chatbot_id=plubot_id).count()
     final_edges_count = session.query(FlowEdge).filter_by(chatbot_id=plubot_id).count()
@@ -639,7 +641,10 @@ def restore_backup(plubot_id: int, backup_id: str) -> Response:
                 jsonify(
                     {
                         "status": "error",
-                        "message": "El backup no pertenece a este plubot",
+                        "message": (
+                        "Flow guardado exitosamente. "
+                        "Puedes cerrar esta ventana y volver a la aplicación."
+                    ),
                     }
                 ),
                 403,
