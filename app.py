@@ -23,6 +23,7 @@ from api.integrations import integrations_bp
 from api.opinion import opinion_bp
 from api.whatsapp_api import whatsapp_api_bp
 from api.whatsapp_business_api import whatsapp_business_bp
+from api.whatsapp_migration_api import whatsapp_migration_bp
 from config.settings import load_config
 from models.token_blocklist import TokenBlocklist
 from models.user import User
@@ -119,6 +120,7 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(discord_integrations_bp)
     app.register_blueprint(whatsapp_api_bp, url_prefix="/api")  # WhatsApp Web.js API
     app.register_blueprint(whatsapp_business_bp, url_prefix="/api")  # New WhatsApp Business API
+    app.register_blueprint(whatsapp_migration_bp)  # WhatsApp Migration API
 
     # Rutas de conveniencia y catch-all
     @app.route("/create", methods=["GET", "POST"])

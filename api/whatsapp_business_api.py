@@ -1,16 +1,49 @@
 """API endpoints para la integración con WhatsApp Business API."""
-from datetime import UTC, datetime
+from enum import Enum
+from typing import Optional, Dict, Any, List
+from datetime import datetime, timedelta
+import os
+import json
 import logging
+import requests
+from flask import Blueprint, request, jsonify
+from functools import wraps
+import jwt
+from redis import Redis
+import hashlib
+import hmac
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import re
 
 from extensions import db
-from flask import Blueprint, Response, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from models.plubot import Plubot
 from models.whatsapp_business import WhatsAppBusiness
 from services.whatsapp_business_service import WhatsAppBusinessService
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Redis client for caching and queue management
+redis_client = Redis(
+    host=os.getenv('REDIS_HOST', 'localhost'),
+    port=int(os.getenv('REDIS_PORT', 6379)),
+    password=os.getenv('REDIS_PASSWORD'),
+    decode_responses=True
+)
+
+# Thread pool for async operations
+executor = ThreadPoolExecutor(max_workers=10)
+
+class RegistrationStatus(Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    VERIFIED = "verified"
+    ACTIVE = "active"
+    FAILED = "failed"
 
 whatsapp_business_bp = Blueprint("whatsapp_business", __name__)
 
