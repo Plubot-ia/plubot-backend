@@ -74,14 +74,19 @@ class Settings:
         self.ENCRYPTION_KEY: str | None = os.getenv("ENCRYPTION_KEY")
         self.OPINION_RECIPIENT_EMAIL: str | None = os.getenv("OPINION_RECIPIENT_EMAIL")
         self.BACKEND_URL: str | None = os.getenv("BACKEND_URL")
-        self.WHATSAPP_API_URL: str | None = os.getenv("WHATSAPP_API_URL")
+        
+        # WhatsApp Microservice (whatsapp-web.js)
+        self.WHATSAPP_API_URL: str | None = os.getenv("WHATSAPP_API_URL", "http://localhost:3001")
         self.WHATSAPP_API_KEY: str | None = os.getenv("WHATSAPP_API_KEY")
 
         # WhatsApp Business API (Official)
         self.FACEBOOK_APP_ID: str | None = os.getenv("FACEBOOK_APP_ID")
         self.FACEBOOK_APP_SECRET: str | None = os.getenv("FACEBOOK_APP_SECRET")
-        self.WHATSAPP_WEBHOOK_VERIFY_TOKEN: str | None = os.getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN")
+        self.WHATSAPP_WEBHOOK_VERIFY_TOKEN: str | None = os.getenv("WHATSAPP_WEBHOOK_VERIFY_TOKEN", "5365c5e47306b5b22ddc53c33b2ec111")
         self.WHATSAPP_REDIRECT_URI: str | None = os.getenv("WHATSAPP_REDIRECT_URI")
+        self.WHATSAPP_ACCESS_TOKEN: str | None = os.getenv("WHATSAPP_ACCESS_TOKEN")
+        self.WHATSAPP_PHONE_NUMBER_ID: str | None = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+        self.WHATSAPP_WEBHOOK_SECRET: str | None = os.getenv("WHATSAPP_WEBHOOK_SECRET")
 
         # Twilio
         self.TWILIO_ACCOUNT_SID: str | None = os.getenv("TWILIO_ACCOUNT_SID")

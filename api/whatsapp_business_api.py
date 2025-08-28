@@ -1,12 +1,11 @@
 """API endpoints para la integración con WhatsApp Business API."""
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
 import os
 import json
 import logging
 import requests
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 from functools import wraps
 import jwt
 from redis import Redis
@@ -15,9 +14,14 @@ import hmac
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import re
+from datetime import datetime, timedelta
 
 from extensions import db
 from flask_jwt_extended import get_jwt_identity, jwt_required
+
+from config.settings import Settings
+
+settings = Settings()
 
 from models.plubot import Plubot
 from models.whatsapp_business import WhatsAppBusiness
